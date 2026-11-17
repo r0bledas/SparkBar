@@ -120,23 +120,22 @@ public struct SettingsSheetView: View {
                         }
                     }
 
-                    // Reasoning Effort Level
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Default Reasoning Effort")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                    // Reasoning Effort Level (Dynamically populated from API `/models`)
+                    let levels = settings.supportedEffortLevelsForCurrentModel
+                    if !levels.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Thinking Effort (Dynamic from API)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
 
-                        let levels = settings.supportedEffortLevelsForCurrentModel.isEmpty
-                            ? ["low", "high", "max"]
-                            : settings.supportedEffortLevelsForCurrentModel
-
-                        Picker("Reasoning Effort", selection: $settings.reasoningEffort) {
-                            ForEach(levels, id: \.self) { level in
-                                Text(level.capitalized).tag(level)
+                            Picker("Thinking Effort", selection: $settings.reasoningEffort) {
+                                ForEach(levels, id: \.self) { level in
+                                    Text(settings.effortDisplayLabel(for: level)).tag(level)
+                                }
                             }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
                         }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
                     }
 
                     // Endpoint URL

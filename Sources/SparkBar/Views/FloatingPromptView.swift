@@ -450,37 +450,39 @@ public struct FloatingPromptView: View {
             .fixedSize()
             .help("Select Model (dynamically loaded from API)")
 
-            // Visual Separator between Model and Thinking Effort
-            Divider()
-                .frame(height: 13)
-                .opacity(0.6)
-
-            // Reasoning Effort Dropdown (None / Low / High / Max — No icon)
+            // Dynamic Thinking Effort Dropdown (Fetched directly from the model's `effort` object in GET /models)
             let effortLevels = settings.supportedEffortLevelsForCurrentModel
 
-            Menu {
-                Section("Thinking Effort") {
-                    ForEach(effortLevels, id: \.self) { level in
-                        Button {
-                            settings.reasoningEffort = level
-                        } label: {
-                            HStack {
-                                Text(level.capitalized)
-                                if settings.reasoningEffort == level {
-                                    Image(systemName: "checkmark")
+            if !effortLevels.isEmpty {
+                // Visual Separator between Model and Thinking Effort
+                Divider()
+                    .frame(height: 13)
+                    .opacity(0.6)
+
+                Menu {
+                    Section("Thinking Effort") {
+                        ForEach(effortLevels, id: \.self) { level in
+                            Button {
+                                settings.reasoningEffort = level
+                            } label: {
+                                HStack {
+                                    Text(settings.effortDisplayLabel(for: level))
+                                    if settings.reasoningEffort == level {
+                                        Image(systemName: "checkmark")
+                                    }
                                 }
                             }
                         }
                     }
+                } label: {
+                    Text(settings.effortDisplayLabel(for: settings.reasoningEffort))
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
                 }
-            } label: {
-                Text(settings.reasoningEffort.capitalized)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Select Thinking Effort (dynamically loaded from API)")
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Select Thinking Effort")
 
             // Visual Separator before the Tools & Web group
             Divider()

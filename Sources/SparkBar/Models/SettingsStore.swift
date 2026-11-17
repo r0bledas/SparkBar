@@ -118,7 +118,7 @@ public final class SettingsStore: ObservableObject {
             self.customEndpoints = initialEndpoints
         }
 
-        self.reasoningEffort = defaults.string(forKey: "sparkbar.reasoningEffort") ?? "high"
+        self.reasoningEffort = defaults.string(forKey: "sparkbar.reasoningEffort") ?? "default"
         self.showProviderInMainBar = defaults.object(forKey: "sparkbar.showProviderInMainBar") as? Bool ?? false
 
         self.systemPrompt = defaults.string(forKey: "sparkbar.systemPrompt") ?? """
@@ -163,12 +163,38 @@ public final class SettingsStore: ObservableObject {
     }
 
     public var supportedEffortLevelsForCurrentModel: [String] {
-        let remoteLevels = currentModelInfo?.supportedEffortLevels ?? ["low", "high", "max"]
-        var levels = ["none"]
-        for lvl in remoteLevels where lvl.lowercased() != "none" {
+        guard let info = currentModelInfo else { return [] }
+        var levels: [String] = []
+        if info.defaultEffortLevel != nil || !info.supportedEffortLevels.isEmpty {
+            levels.append("default")
+        }
+        for lvl in info.supportedEffortLevels where !levels.contains(lvl) {
             levels.append(lvl)
         }
         return levels
+    }
+
+    public func effortDisplayLabel(for level: String) -> String {
+        if level == "default" {
+            if let def = currentModelInfo?.defaultEffortLevel, !def.isEmpty {
+                return "Default (\(def.capitalized))"
+            }
+            return "Default"
+        }
+        return level.capitalized
+    }
+
+    public var effectiveReasoningEffortForAPI: String? {
+        guard let info = currentModelInfo, !info.supportedEffortLevels.isEmpty else {
+            return nil
+        }
+        if reasoningEffort == "default" {
+            return info.defaultEffortLevel
+        }
+        if info.supportedEffortLevels.contains(reasoningEffort) {
+            return reasoningEffort
+        }
+        return info.defaultEffortLevel
     }
 
     public var currentBaseURL: String {
@@ -222,8 +248,9 @@ public final class SettingsStore: ObservableObject {
 
     private func syncEffortLevelWithCurrentModel() {
         let validLevels = supportedEffortLevelsForCurrentModel
+        guard !validLevels.isEmpty else { return }
         if !validLevels.contains(reasoningEffort) {
-            reasoningEffort = currentModelInfo?.defaultEffortLevel ?? "high"
+            reasoningEffort = "default"
         }
     }
 

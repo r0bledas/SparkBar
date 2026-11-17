@@ -69,7 +69,7 @@ public final class ChatViewModel: ObservableObject {
             let model = settings.currentModel
             let baseURL = settings.currentBaseURL
             let apiKey = settings.apiKey(for: provider)
-            let effort: String? = settings.supportedEffortLevelsForCurrentModel.isEmpty ? nil : settings.reasoningEffort
+            let effort: String? = settings.effectiveReasoningEffortForAPI
 
             do {
                 let result = try await client.streamTurn(
