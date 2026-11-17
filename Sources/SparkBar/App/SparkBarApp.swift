@@ -40,7 +40,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
-        appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAndResetAction), keyEquivalent: "w")
+        appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAction), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit SparkBar", action: #selector(quitAppAction), keyEquivalent: "q")
@@ -81,8 +81,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(toggleItem)
 
         let closeItem = NSMenuItem(
-            title: "Close & Reset Panel",
-            action: #selector(closePanelAndResetAction),
+            title: "Close Panel",
+            action: #selector(closePanelAction),
             keyEquivalent: "w"
         )
         closeItem.keyEquivalentModifierMask = [.command]
@@ -128,8 +128,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         PanelController.shared.togglePanel()
     }
 
-    @objc private func closePanelAndResetAction() {
-        PanelController.shared.closeAndResetPanel()
+    @objc private func closePanelAction() {
+        PanelController.shared.hidePanel()
     }
 
     @objc private func clearConversationAction() {

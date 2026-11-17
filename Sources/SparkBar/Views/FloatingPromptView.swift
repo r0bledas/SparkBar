@@ -39,7 +39,11 @@ public struct FloatingPromptView: View {
                 .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
         )
         .padding(8)
-        .frame(minWidth: 380, maxWidth: .infinity, minHeight: 110, maxHeight: .infinity)
+        .frame(width: 680)
+        .frame(
+            minHeight: visibleMessages.isEmpty && viewModel.errorMessage == nil ? 114 : 440,
+            maxHeight: 540
+        )
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }
@@ -48,12 +52,6 @@ public struct FloatingPromptView: View {
         }
         .onReceive(PanelController.shared.focusTrigger) { _ in
             isInputFocused = true
-        }
-        .onChange(of: visibleMessages.isEmpty) { _, isEmpty in
-            PanelController.shared.updateHeightForConversationIfNeeded(hasMessages: !isEmpty || viewModel.errorMessage != nil)
-        }
-        .onChange(of: viewModel.errorMessage != nil) { _, hasError in
-            PanelController.shared.updateHeightForConversationIfNeeded(hasMessages: !visibleMessages.isEmpty || hasError)
         }
     }
 
@@ -295,7 +293,7 @@ public struct FloatingPromptView: View {
                         .accessibilityLabel("Copy assistant answer")
                     }
                     .padding(.top, 2)
-                } else if viewModel.isStreaming {
+                } else if viewModel.isStreaming && message.id == viewModel.messages.last?.id && viewModel.activeToolStatus == nil {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.small)

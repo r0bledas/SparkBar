@@ -264,13 +264,12 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Reads `AGENTS.md` to inject live workspace and environment context into the system prompt.
+    /// Reads universal `AGENTS.md` to include agent instructions in the system prompt.
     public func effectiveSystemPrompt() -> String {
         var prompt = systemPrompt
         let candidatePaths = [
-            FileManager.default.currentDirectoryPath + "/AGENTS.md",
-            "/Users/raudel/.gemini/antigravity/scratch/SparkBar/AGENTS.md",
-            Bundle.main.bundlePath + "/Contents/Resources/AGENTS.md"
+            Bundle.main.bundlePath + "/Contents/Resources/AGENTS.md",
+            FileManager.default.currentDirectoryPath + "/AGENTS.md"
         ]
         for path in candidatePaths {
             if let agentsDoc = try? String(contentsOfFile: path, encoding: .utf8), !agentsDoc.isEmpty {
