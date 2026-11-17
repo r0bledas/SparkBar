@@ -164,35 +164,45 @@ public final class SettingsStore: ObservableObject {
 
     public var supportedEffortLevelsForCurrentModel: [String] {
         guard let info = currentModelInfo else { return [] }
-        var levels: [String] = []
-        if info.defaultEffortLevel != nil || !info.supportedEffortLevels.isEmpty {
-            levels.append("default")
-        }
-        for lvl in info.supportedEffortLevels where !levels.contains(lvl) {
+        var levels: [String] = ["none", "default"]
+        for lvl in info.supportedEffortLevels where !levels.contains(lvl.lowercased()) {
             levels.append(lvl)
         }
         return levels
     }
 
+    public var dynamicModelEffortLevelsOnly: [String] {
+        guard let info = currentModelInfo else { return [] }
+        return info.supportedEffortLevels.filter { $0.lowercased() != "none" && $0.lowercased() != "default" }
+    }
+
     public func effortDisplayLabel(for level: String) -> String {
-        if level == "default" {
+        switch level.lowercased() {
+        case "none":
+            return "None"
+        case "default":
             if let def = currentModelInfo?.defaultEffortLevel, !def.isEmpty {
                 return "Default (\(def.capitalized))"
             }
             return "Default"
+        default:
+            return level.capitalized
         }
-        return level.capitalized
     }
 
     public var effectiveReasoningEffortForAPI: String? {
         guard let info = currentModelInfo, !info.supportedEffortLevels.isEmpty else {
             return nil
         }
-        if reasoningEffort == "default" {
+        let current = reasoningEffort.lowercased()
+        if current == "none" {
+            return nil
+        }
+        if current == "default" {
             return info.defaultEffortLevel
         }
-        if info.supportedEffortLevels.contains(reasoningEffort) {
-            return reasoningEffort
+        if info.supportedEffortLevels.contains(current) {
+            return current
         }
         return info.defaultEffortLevel
     }

@@ -49,6 +49,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.target = self
         menu.addItem(toggleItem)
 
+        let closeItem = NSMenuItem(
+            title: "Close Panel",
+            action: #selector(closePanelAction),
+            keyEquivalent: "w"
+        )
+        closeItem.keyEquivalentModifierMask = [.command]
+        closeItem.target = self
+        menu.addItem(closeItem)
+
         let clearItem = NSMenuItem(
             title: "New / Clear Prompt",
             action: #selector(clearConversationAction),
@@ -86,6 +95,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePanelAction() {
         PanelController.shared.togglePanel()
+    }
+
+    @objc private func closePanelAction() {
+        PanelController.shared.hidePanel()
     }
 
     @objc private func clearConversationAction() {

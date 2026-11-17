@@ -59,12 +59,6 @@ public struct FloatingPromptView: View {
 
     private var promptInputBar: some View {
         HStack(spacing: 12) {
-            Image(systemName: viewModel.isStreaming ? "sparkles" : "bolt.horizontal.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(viewModel.isStreaming ? Color.orange : Color.accentColor)
-                .symbolEffect(.pulse, isActive: viewModel.isStreaming)
-                .frame(width: 24, height: 24)
-
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16.5, weight: .regular))
@@ -450,26 +444,48 @@ public struct FloatingPromptView: View {
             .fixedSize()
             .help("Select Model (dynamically loaded from API)")
 
-            // Dynamic Thinking Effort Dropdown (Fetched directly from the model's `effort` object in GET /models)
-            let effortLevels = settings.supportedEffortLevelsForCurrentModel
+            // Dynamic Thinking Effort Dropdown (Hierarchical: None, Default, Divider, then API levels low / high / max)
+            let dynamicLevels = settings.dynamicModelEffortLevelsOnly
 
-            if !effortLevels.isEmpty {
+            if !dynamicLevels.isEmpty {
                 // Visual Separator between Model and Thinking Effort
                 Divider()
                     .frame(height: 13)
                     .opacity(0.6)
 
                 Menu {
-                    Section("Thinking Effort") {
-                        ForEach(effortLevels, id: \.self) { level in
-                            Button {
-                                settings.reasoningEffort = level
-                            } label: {
-                                HStack {
-                                    Text(settings.effortDisplayLabel(for: level))
-                                    if settings.reasoningEffort == level {
-                                        Image(systemName: "checkmark")
-                                    }
+                    Button {
+                        settings.reasoningEffort = "none"
+                    } label: {
+                        HStack {
+                            Text("None")
+                            if settings.reasoningEffort.lowercased() == "none" {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+
+                    Button {
+                        settings.reasoningEffort = "default"
+                    } label: {
+                        HStack {
+                            Text(settings.effortDisplayLabel(for: "default"))
+                            if settings.reasoningEffort.lowercased() == "default" {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    ForEach(dynamicLevels, id: \.self) { level in
+                        Button {
+                            settings.reasoningEffort = level
+                        } label: {
+                            HStack {
+                                Text(level.capitalized)
+                                if settings.reasoningEffort.lowercased() == level.lowercased() {
+                                    Image(systemName: "checkmark")
                                 }
                             }
                         }
@@ -481,7 +497,7 @@ public struct FloatingPromptView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Select Thinking Effort (dynamically loaded from API)")
+                .help("Select Thinking Effort")
             }
 
             // Visual Separator before the Tools & Web group
@@ -489,24 +505,20 @@ public struct FloatingPromptView: View {
                 .frame(height: 13)
                 .opacity(0.6)
 
-            // Tools & Web grouped together without a separator between them
+            // Tools & Web grouped together without a separator between them (No icons)
             HStack(spacing: 6) {
                 Button {
                     settings.enableTools.toggle()
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
-                            .font(.system(size: 10.5))
-                        Text("Tools")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
-                        in: Capsule()
-                    )
+                    Text("Tools")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(
+                            (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
+                            in: Capsule()
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("Toggle autonomous tools (Web Search, Terminal, File I/O)")
@@ -514,19 +526,15 @@ public struct FloatingPromptView: View {
                 Button {
                     settings.enableWebSearchTool.toggle()
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 10.5))
-                        Text("Web")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
-                        in: Capsule()
-                    )
+                    Text("Web")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(
+                            (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
+                            in: Capsule()
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("Toggle live web search")

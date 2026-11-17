@@ -46,7 +46,21 @@ public final class FloatingPanel: NSPanel {
             onEscapePressed?()
             return
         }
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            onEscapePressed?()
+            return
+        }
         super.keyDown(with: event)
+    }
+
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            onEscapePressed?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
@@ -111,10 +125,10 @@ public final class PanelController: NSObject, NSWindowDelegate {
         let panelSize = panel.frame.size
 
         let x = visibleFrame.origin.x + (visibleFrame.width - panelSize.width) / 2.0
-        // Position in the upper-third of the screen like Spotlight / ChatGPT bar
-        let y = visibleFrame.origin.y + visibleFrame.height * 0.68 - (panelSize.height / 2.0)
+        // Position near the middle-bottom of the screen (not completely at the bottom)
+        let y = visibleFrame.origin.y + visibleFrame.height * 0.25 - (panelSize.height / 2.0)
 
-        let clampedY = max(visibleFrame.origin.y + 40, min(y, visibleFrame.maxY - panelSize.height - 20))
+        let clampedY = max(visibleFrame.origin.y + 80, min(y, visibleFrame.maxY - panelSize.height - 40))
         panel.setFrameOrigin(NSPoint(x: x, y: clampedY))
     }
 
