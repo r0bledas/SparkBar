@@ -28,6 +28,21 @@ Press **`⌥ + Space`** (`Option + Space`) from anywhere on your Mac to summon a
 
 ---
 
+## 💬 Why This Exists (A Small Rant)
+
+OpenAI had a good thing going with the original native macOS ChatGPT app and its instant `Option + Space` companion bar—and then they decided to migrate everything into the unified **Codex** app (`com.openai.codex`), relegating the old app to *"ChatGPT Classic"* and replacing a lightweight launcher with a full-blown **Electron super-app** that bundles Chat, Work, and an entire IDE workspace into a 1 GB+ RAM hog.
+
+And the **Gemini** macOS app isn't the answer either. Sure, it exists as an alternative, but it hits you with a splash icon and a splash window when all you wanted was a prompt box.
+
+When I press `⌥ + Space`, **I need it to be immediate.**
+- I don't need splash icons or splash windows.
+- I don't need an Electron wrapper burning a whole gigabyte of RAM in the background just to render a text box.
+- I just want to press `⌥ + Space`, ask a question, search the live web, or have an autonomous agent run a local task—**instantly**—and get out of my way.
+
+So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero splash screens, zero Electron, zero bloat.
+
+---
+
 ## ✨ Features
 
 * **Featherweight Native Architecture:** Pure Swift & AppKit `NSPanel` with `.nonactivatingPanel`, `NSVisualEffectView` HUD blur, and magnetic axis snapping with trackpad haptic alignment—zero Chromium/Electron bloat.
