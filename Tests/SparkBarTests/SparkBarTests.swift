@@ -124,4 +124,31 @@ final class SparkBarTests: XCTestCase {
         XCTAssertFalse(cmdRecord.isError)
         XCTAssertEqual(cmdRecord.output.trimmingCharacters(in: .whitespacesAndNewlines), "42")
     }
+
+    @MainActor
+    func testLiveDeepSeekStreamingIfKeyAvailable() async throws {
+        _ = SettingsStore.shared // triggers bootstrap
+        let key = KeychainHelper.loadKey(for: LLMProviderType.deepseek.rawValue)
+        guard !key.isEmpty else { return }
+
+        let client = LLMStreamingClient()
+        let userMsg = ChatMessage(role: .user, content: "Reply with the exact string SPARKBAR_OK and nothing else.")
+        var streamed = ""
+
+        let result = try await client.streamTurn(
+            messages: [userMsg],
+            provider: .deepseek,
+            model: "deepseek-chat",
+            baseURL: LLMProviderType.deepseek.defaultBaseURL,
+            apiKey: key,
+            systemPrompt: "You are a helpful assistant.",
+            temperature: 0.0,
+            enableServerSideSearch: false
+        ) { partial, _ in
+            streamed = partial
+        }
+
+        XCTAssertTrue(result.content.contains("SPARKBAR_OK"), "Got: \(result.content)")
+        XCTAssertFalse(streamed.isEmpty)
+    }
 }
