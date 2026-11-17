@@ -129,6 +129,47 @@ final class SparkBarTests: XCTestCase {
         XCTAssertTrue(hasASCII, "Expected ASCII box table to be parsed")
     }
 
+    func testLaTeXAndMarkdownRichBlocks() {
+        let md = """
+        # Heading One
+        ---
+        > Quoted insight
+        $$
+        \\frac{\\alpha + \\beta}{\\sqrt{x^2 + 1}} \\leq \\infty
+        $$
+        Inline math $E = mc^2$ and $\\pi \\approx 3.14$.
+        """
+
+        let blocks = MarkdownMessageView.parseBlocks(from: md)
+        let hasHeading = blocks.contains { if case .heading(_, 1, "Heading One") = $0 { return true }; return false }
+        let hasRule = blocks.contains { if case .horizontalRule = $0 { return true }; return false }
+        let hasQuote = blocks.contains { if case .blockquote(_, let q) = $0 { return q.contains("Quoted") }; return false }
+        let hasMath = blocks.contains { if case .mathBlock = $0 { return true }; return false }
+
+        XCTAssertTrue(hasHeading)
+        XCTAssertTrue(hasRule)
+        XCTAssertTrue(hasQuote)
+        XCTAssertTrue(hasMath)
+
+        let converted = MarkdownMessageView.convertInlineLaTeXInText("Formula: $E = mc^2$ and $\\alpha_1 \\neq \\beta_2$")
+        XCTAssertTrue(converted.contains("²"))
+        XCTAssertTrue(converted.contains("α₁"))
+        XCTAssertTrue(converted.contains("≠"))
+    }
+
+    @MainActor
+    func testWebSearchToolReturnsRealResults() async {
+        let call = ToolCallRequest(
+            id: "call_web_1",
+            name: "web_search",
+            arguments: #"{"query":"Apple Inc latest news"}"#
+        )
+        let record = await ToolExecutor.execute(call)
+        XCTAssertFalse(record.isError, "Expected web_search to succeed, got: \(record.output)")
+        XCTAssertFalse(record.output.contains("No web search results found"), "Got empty search results: \(record.output)")
+        XCTAssertTrue(record.output.contains("URL:"), "Expected structured URLs in web_search output, got: \(record.output)")
+    }
+
     func testToolExecutorRunCommandAndFileIO() async {
         let tempPath = "/tmp/sparkbar_unit_test_\(UUID().uuidString).txt"
         let writeCall = ToolCallRequest(

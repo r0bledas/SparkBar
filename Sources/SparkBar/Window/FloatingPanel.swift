@@ -18,6 +18,7 @@ public final class FloatingPanel: NSPanel {
         self.isFloatingPanel = true
         self.level = .floating
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        self.animationBehavior = .none
         self.isMovableByWindowBackground = false
         self.backgroundColor = .clear
         self.isOpaque = false
@@ -184,10 +185,10 @@ public struct WindowDragHandle: NSViewRepresentable {
 public final class PanelController: NSObject, NSWindowDelegate {
     public static let shared = PanelController()
 
-    public static let panelWidth: CGFloat = 540
+    public static let panelWidth: CGFloat = 520
     public static let collapsedHeight: CGFloat = 110
-    /// Maximum height follows a 1.2:1 aspect ratio relative to width (540 / 1.2 = 450pt)
-    public static let maxExpandedHeight: CGFloat = 450
+    /// Once active with messages, the window is a 1:1 square (520 x 520)
+    public static let maxExpandedHeight: CGFloat = 520
 
     private var panel: FloatingPanel?
     public let focusTrigger = PassthroughSubject<Void, Never>()

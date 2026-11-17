@@ -8,6 +8,9 @@ public struct FloatingPromptView: View {
     @State private var expandedToolIds: Set<UUID> = []
     @State private var expandedReasoningIds: Set<UUID> = []
     @State private var copiedMessageId: UUID? = nil
+    @State private var isUserScrolledUp: Bool = false
+    @State private var scrollToBottomTrigger: Int = 0
+    @State private var scrollWheelMonitor: Any? = nil
 
     public init() {}
 
@@ -53,12 +56,35 @@ public struct FloatingPromptView: View {
         .onAppear {
             isInputFocused = true
             PanelController.shared.syncPanelHeight(hasMessages: hasActiveChatArea)
+            setupScrollMonitor()
+        }
+        .onDisappear {
+            if let monitor = scrollWheelMonitor {
+                NSEvent.removeMonitor(monitor)
+                scrollWheelMonitor = nil
+            }
         }
         .onChange(of: hasActiveChatArea) { _, active in
+            if !active {
+                isUserScrolledUp = false
+            }
             PanelController.shared.syncPanelHeight(hasMessages: active)
         }
         .onReceive(PanelController.shared.focusTrigger) { _ in
             isInputFocused = true
+        }
+    }
+
+    private func setupScrollMonitor() {
+        guard scrollWheelMonitor == nil else { return }
+        scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            if event.scrollingDeltaY > 2.0 {
+                // User scrolled upward away from the live bottom stream
+                if !isUserScrolledUp {
+                    isUserScrolledUp = true
+                }
+            }
+            return event
         }
     }
 
@@ -124,17 +150,34 @@ public struct FloatingPromptView: View {
 
     private var conversationArea: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    let items = visibleMessages
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
-                        messageRow(for: msg)
-                            .id(msg.id)
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        let items = visibleMessages
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
+                            messageRow(for: msg)
+                                .id(msg.id)
 
-                        if index < items.count - 1 {
-                            let nextMsg = items[index + 1]
-                            if isBotChainItem(msg) && isBotChainItem(nextMsg) {
-                                // White vertical connector line aligned after 2x the corner-rounding inset (12pt * 2 = 24pt)
+                            if index < items.count - 1 {
+                                let nextMsg = items[index + 1]
+                                if isBotChainItem(msg) && isBotChainItem(nextMsg) {
+                                    // White vertical connector line aligned after 2x the corner-rounding inset (12pt * 2 = 24pt)
+                                    HStack(spacing: 0) {
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.38))
+                                            .frame(width: 2, height: 14)
+                                            .padding(.leading, 24)
+                                        Spacer()
+                                    }
+                                } else {
+                                    Spacer()
+                                        .frame(height: 12)
+                                }
+                            }
+                        }
+
+                        if let toolStatus = viewModel.activeToolStatus {
+                            if let last = items.last, isBotChainItem(last) {
                                 HStack(spacing: 0) {
                                     Rectangle()
                                         .fill(Color.white.opacity(0.38))
@@ -142,74 +185,92 @@ public struct FloatingPromptView: View {
                                         .padding(.leading, 24)
                                     Spacer()
                                 }
-                            } else {
-                                Spacer()
-                                    .frame(height: 12)
+                            } else if !items.isEmpty {
+                                Spacer().frame(height: 12)
                             }
-                        }
-                    }
 
-                    if let toolStatus = viewModel.activeToolStatus {
-                        if let last = items.last, isBotChainItem(last) {
-                            HStack(spacing: 0) {
-                                Rectangle()
-                                    .fill(Color.white.opacity(0.38))
-                                    .frame(width: 2, height: 14)
-                                    .padding(.leading, 24)
-                                Spacer()
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(toolStatus)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
                             }
-                        } else if !items.isEmpty {
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.primary.opacity(0.06), in: Capsule())
+                            .id("tool_status_indicator")
+                        }
+
+                        if let error = viewModel.errorMessage {
                             Spacer().frame(height: 12)
-                        }
-
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(toolStatus)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
-                        .id("tool_status_indicator")
-                    }
-
-                    if let error = viewModel.errorMessage {
-                        Spacer().frame(height: 12)
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(error)
-                                    .font(.system(size: 12.5))
-                                    .foregroundStyle(.primary)
-                                    .textSelection(.enabled)
-                                Button("Open Settings") {
-                                    viewModel.showSettings = true
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(error)
+                                        .font(.system(size: 12.5))
+                                        .foregroundStyle(.primary)
+                                        .textSelection(.enabled)
+                                    Button("Open Settings") {
+                                        viewModel.showSettings = true
+                                    }
+                                    .controlSize(.small)
                                 }
-                                .controlSize(.small)
+                                Spacer()
                             }
-                            Spacer()
+                            .padding(12)
+                            .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .id("error_banner")
                         }
-                        .padding(12)
-                        .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .id("error_banner")
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("stream_bottom_anchor")
+                            .onAppear {
+                                // When the bottom anchor becomes visible again, hide the floating arrow
+                                isUserScrolledUp = false
+                            }
                     }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+
+                // Centered floating down-arrow button above the "Ask anything" bar when user scrolls up
+                if isUserScrolledUp {
+                    Button {
+                        isUserScrolledUp = false
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo("stream_bottom_anchor", anchor: .bottom)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 28, height: 28)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.28), radius: 5, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 10)
+                    .help("Scroll to bottom")
+                }
             }
             .onChange(of: viewModel.messages.last?.content) { _, _ in
-                if let lastId = visibleMessages.last?.id {
-                    proxy.scrollTo(lastId, anchor: .bottom)
-                }
+                guard !isUserScrolledUp else { return }
+                proxy.scrollTo("stream_bottom_anchor", anchor: .bottom)
             }
             .onChange(of: visibleMessages.count) { _, _ in
-                if let lastId = visibleMessages.last?.id {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(lastId, anchor: .bottom)
-                    }
+                if viewModel.messages.last?.role == .user {
+                    isUserScrolledUp = false
+                }
+                guard !isUserScrolledUp else { return }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("stream_bottom_anchor", anchor: .bottom)
                 }
             }
         }
@@ -312,9 +373,11 @@ public struct FloatingPromptView: View {
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
 
-                    Divider()
-                        .opacity(0.35)
-                        .padding(.vertical, 2)
+                    // Harder, more noticeable separator between the bot's content and the Copy Answer action bar
+                    Rectangle()
+                        .fill(Color.white.opacity(0.28))
+                        .frame(height: 1.5)
+                        .padding(.vertical, 4)
 
                     HStack(spacing: 12) {
                         Button {

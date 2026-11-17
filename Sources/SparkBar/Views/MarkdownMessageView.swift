@@ -35,6 +35,10 @@ public struct VisualEffectBlur: NSViewRepresentable {
 
 public enum MarkdownBlock: Identifiable, Equatable {
     case text(id: Int, content: String)
+    case heading(id: Int, level: Int, title: String)
+    case horizontalRule(id: Int)
+    case blockquote(id: Int, content: String)
+    case mathBlock(id: Int, latex: String)
     case code(id: Int, language: String, code: String)
     case table(id: Int, headers: [String], rows: [[String]], rawText: String)
     case asciiArt(id: Int, content: String)
@@ -42,6 +46,10 @@ public enum MarkdownBlock: Identifiable, Equatable {
     public var id: Int {
         switch self {
         case .text(let id, _): return id
+        case .heading(let id, _, _): return id
+        case .horizontalRule(let id): return id
+        case .blockquote(let id, _): return id
+        case .mathBlock(let id, _): return id
         case .code(let id, _, _): return id
         case .table(let id, _, _, _): return id
         case .asciiArt(let id, _): return id
@@ -69,6 +77,43 @@ public struct MarkdownMessageView: View {
                             renderedParagraph(trimmed)
                         }
                     }
+
+                case .heading(_, let level, let title):
+                    renderedHeading(level: level, title: title)
+
+                case .horizontalRule:
+                    // Subtle bot-sent horizontal rule (`---`), matching the gentle separator style
+                    Divider()
+                        .opacity(0.35)
+                        .padding(.vertical, 4)
+
+                case .blockquote(_, let quoteText):
+                    HStack(alignment: .top, spacing: 10) {
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(Color.accentColor.opacity(0.75))
+                            .frame(width: 3)
+                        inlineMarkdownText(quoteText, font: .system(size: 13.5, weight: .regular))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+
+                case .mathBlock(_, let latex):
+                    HStack {
+                        Spacer(minLength: 8)
+                        Text(Self.renderLaTeXToUnicode(latex))
+                            .font(.system(size: 15, weight: .medium, design: .serif))
+                            .foregroundStyle(.primary)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        Spacer(minLength: 8)
+                    }
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                    )
 
                 case .table(_, let headers, let rows, _):
                     renderedMarkdownTable(headers: headers, rows: rows)
@@ -144,6 +189,18 @@ public struct MarkdownMessageView: View {
     }
 
     @ViewBuilder
+    private func renderedHeading(level: Int, title: String) -> some View {
+        let size: CGFloat = switch level {
+        case 1: 18
+        case 2: 16
+        case 3: 14.5
+        default: 13.5
+        }
+        inlineMarkdownText(title, font: .system(size: size, weight: .bold))
+            .padding(.top, level <= 2 ? 4 : 2)
+    }
+
+    @ViewBuilder
     private func renderedMarkdownTable(headers: [String], rows: [[String]]) -> some View {
         let colCount = max(headers.count, rows.map(\.count).max() ?? 0)
         if colCount > 0 {
@@ -212,8 +269,9 @@ public struct MarkdownMessageView: View {
 
     @ViewBuilder
     private func inlineMarkdownText(_ raw: String, font: Font) -> some View {
+        let processed = Self.convertInlineLaTeXInText(raw)
         if let attributed = try? AttributedString(
-            markdown: raw,
+            markdown: processed,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
             Text(attributed)
@@ -221,7 +279,7 @@ public struct MarkdownMessageView: View {
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
         } else {
-            Text(raw)
+            Text(processed)
                 .font(font)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
@@ -230,8 +288,9 @@ public struct MarkdownMessageView: View {
 
     @ViewBuilder
     private func renderedParagraph(_ paragraph: String) -> some View {
+        let processed = Self.convertInlineLaTeXInText(paragraph)
         if let attributed = try? AttributedString(
-            markdown: paragraph,
+            markdown: processed,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
             Text(attributed)
@@ -240,7 +299,7 @@ public struct MarkdownMessageView: View {
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
         } else {
-            Text(paragraph)
+            Text(processed)
                 .font(.system(size: 14, weight: .regular))
                 .lineSpacing(3)
                 .foregroundStyle(.primary)
@@ -248,7 +307,180 @@ public struct MarkdownMessageView: View {
         }
     }
 
-    // MARK: - Block Parser (Code blocks, Markdown pipe tables, ASCII box tables, and prose)
+    // MARK: - LaTeX to Unicode Mathematical Formatter
+
+    public static func convertInlineLaTeXInText(_ input: String) -> String {
+        var result = input
+
+        // Replace `\[ ... \]` and `$$ ... $$` inline occurrences
+        result = replaceRegexMatches(in: result, pattern: #"\$\$([\s\S]*?)\$\$"#) { inner in
+            renderLaTeXToUnicode(inner)
+        }
+        result = replaceRegexMatches(in: result, pattern: #"\\\[([\s\S]*?)\\\]"#) { inner in
+            renderLaTeXToUnicode(inner)
+        }
+        // Replace `\(...\)`
+        result = replaceRegexMatches(in: result, pattern: #"\\\((.*?)\\\)"#) { inner in
+            renderLaTeXToUnicode(inner)
+        }
+        // Replace `$ ... $` (single-line inline math, avoiding currency like `$100` followed by space)
+        result = replaceRegexMatches(in: result, pattern: #"\$([^\$\n]+?)\$"#) { inner in
+            renderLaTeXToUnicode(inner)
+        }
+        return result
+    }
+
+    private static func replaceRegexMatches(in text: String, pattern: String, transform: (String) -> String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        var out = text
+        let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
+        for match in matches {
+            if match.numberOfRanges >= 2,
+               let fullRange = Range(match.range(at: 0), in: out),
+               let innerRange = Range(match.range(at: 1), in: out) {
+                let inner = String(out[innerRange])
+                let replacement = transform(inner)
+                out.replaceSubrange(fullRange, with: replacement)
+            }
+        }
+        return out
+    }
+
+    public static func renderLaTeXToUnicode(_ latex: String) -> String {
+        var s = latex.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // `\frac{a}{b}` -> `(a)/(b)`
+        s = replaceTwoArgMacro(in: s, macro: "\\frac") { a, b in
+            let left = a.count == 1 ? a : "(\(a))"
+            let right = b.count == 1 ? b : "(\(b))"
+            return "\(left)⁄\(right)"
+        }
+
+        // `\sqrt{x}` -> `√(x)`
+        s = replaceOneArgMacro(in: s, macro: "\\sqrt") { x in
+            x.count == 1 ? "√\(x)" : "√(\(x))"
+        }
+
+        // Text / formatting macros `\text{...}`, `\mathrm{...}`, `\mathbf{...}`
+        for macro in ["\\text", "\\mathrm", "\\mathbf", "\\mathit", "\\mathcal", "\\operatorname"] {
+            s = replaceOneArgMacro(in: s, macro: macro) { $0 }
+        }
+
+        // Superscripts `^{...}` and `^x`
+        s = replaceRegexMatches(in: s, pattern: #"\^\{([^\}]+)\}"#) { exp in
+            mapSuperscript(exp)
+        }
+        s = replaceRegexMatches(in: s, pattern: #"\^([0-9a-zA-Z\+\-\=])"#) { exp in
+            mapSuperscript(exp)
+        }
+
+        // Subscripts `_{...}` and `_x`
+        s = replaceRegexMatches(in: s, pattern: #"_\{([^\}]+)\}"#) { sub in
+            mapSubscript(sub)
+        }
+        s = replaceRegexMatches(in: s, pattern: #"_([0-9a-zA-Z\+\-\=])"#) { sub in
+            mapSubscript(sub)
+        }
+
+        let symbolMap: [(String, String)] = [
+            ("\\left(", "("), ("\\right)", ")"),
+            ("\\left[", "["), ("\\right]", "]"),
+            ("\\left\\{", "{"), ("\\right\\}", "}"),
+            ("\\leftrightarrow", "↔"), ("\\Leftrightarrow", "⇔"),
+            ("\\rightarrow", "→"), ("\\to", "→"), ("\\Rightarrow", "⇒"),
+            ("\\leftarrow", "←"), ("\\Leftarrow", "⇐"),
+            ("\\mapsto", "↦"), ("\\implies", "⟹"), ("\\iff", "⟺"),
+            ("\\approx", "≈"), ("\\neq", "≠"), ("\\ne", "≠"),
+            ("\\leq", "≤"), ("\\le", "≤"), ("\\geq", "≥"), ("\\ge", "≥"),
+            ("\\pm", "±"), ("\\mp", "∓"), ("\\times", "×"), ("\\cdot", "·"), ("\\div", "÷"),
+            ("\\infty", "∞"), ("\\partial", "∂"), ("\\nabla", "∇"),
+            ("\\sum", "∑"), ("\\prod", "∏"), ("\\int", "∫"), ("\\oint", "∮"),
+            ("\\forall", "∀"), ("\\exists", "∃"), ("\\nexists", "∄"),
+            ("\\in", "∈"), ("\\notin", "∉"), ("\\subset", "⊂"), ("\\subseteq", "⊆"),
+            ("\\cup", "∪"), ("\\cap", "∩"), ("\\emptyset", "∅"),
+            ("\\mathbb{R}", "ℝ"), ("\\mathbb{N}", "ℕ"), ("\\mathbb{Z}", "ℤ"), ("\\mathbb{Q}", "ℚ"), ("\\mathbb{C}", "ℂ"),
+            ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
+            ("\\epsilon", "ϵ"), ("\\varepsilon", "ε"), ("\\zeta", "ζ"), ("\\eta", "η"),
+            ("\\theta", "θ"), ("\\iota", "ι"), ("\\kappa", "κ"), ("\\lambda", "λ"),
+            ("\\mu", "μ"), ("\\nu", "ν"), ("\\xi", "ξ"), ("\\pi", "π"),
+            ("\\rho", "ρ"), ("\\sigma", "σ"), ("\\tau", "τ"), ("\\upsilon", "υ"),
+            ("\\phi", "ϕ"), ("\\varphi", "φ"), ("\\chi", "χ"), ("\\psi", "ψ"), ("\\omega", "ω"),
+            ("\\Gamma", "Γ"), ("\\Delta", "Δ"), ("\\Theta", "Θ"), ("\\Lambda", "Λ"),
+            ("\\Xi", "Ξ"), ("\\Pi", "Π"), ("\\Sigma", "Σ"), ("\\Phi", "Φ"), ("\\Psi", "Ψ"), ("\\Omega", "Ω"),
+            ("\\dots", "…"), ("\\ldots", "…"), ("\\cdots", "⋯"),
+            ("\\quad", "  "), ("\\,", " "), ("\\;", " "), ("\\!", "")
+        ]
+
+        for (cmd, sym) in symbolMap {
+            s = s.replacingOccurrences(of: cmd, with: sym)
+        }
+
+        // Remove leftover curly braces used for grouping
+        s = s.replacingOccurrences(of: "{", with: "").replacingOccurrences(of: "}", with: "")
+        return s
+    }
+
+    private static func replaceOneArgMacro(in text: String, macro: String, transform: (String) -> String) -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: macro)
+        return replaceRegexMatches(in: text, pattern: "\(escaped)\\{([^\\}]*)\\}", transform: transform)
+    }
+
+    private static func replaceTwoArgMacro(in text: String, macro: String, transform: (String, String) -> String) -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: macro)
+        guard let regex = try? NSRegularExpression(pattern: "\(escaped)\\{([^\\}]*)\\}\\{([^\\}]*)\\}") else { return text }
+        var out = text
+        let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
+        for match in matches {
+            if match.numberOfRanges >= 3,
+               let fullRange = Range(match.range(at: 0), in: out),
+               let r1 = Range(match.range(at: 1), in: out),
+               let r2 = Range(match.range(at: 2), in: out) {
+                let rep = transform(String(out[r1]), String(out[r2]))
+                out.replaceSubrange(fullRange, with: rep)
+            }
+        }
+        return out
+    }
+
+    private static func mapSuperscript(_ str: String) -> String {
+        let map: [Character: Character] = [
+            "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+            "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+            "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+            "n": "ⁿ", "i": "ⁱ", "x": "ˣ", "y": "ʸ", "T": "ᵀ"
+        ]
+        var result = ""
+        for ch in str {
+            if let mapped = map[ch] {
+                result.append(mapped)
+            } else {
+                return "^(\(str))"
+            }
+        }
+        return result
+    }
+
+    private static func mapSubscript(_ str: String) -> String {
+        let map: [Character: Character] = [
+            "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+            "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+            "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+            "a": "ₐ", "e": "ₑ", "i": "ᵢ", "j": "ⱼ", "k": "ₖ",
+            "m": "ₘ", "n": "ₙ", "o": "ₒ", "p": "ₚ", "r": "ᵣ",
+            "s": "ₛ", "t": "ₜ", "u": "ᵤ", "v": "ᵥ", "x": "ₓ"
+        ]
+        var result = ""
+        for ch in str {
+            if let mapped = map[ch] {
+                result.append(mapped)
+            } else {
+                return "_(\(str))"
+            }
+        }
+        return result
+    }
+
+    // MARK: - Block Parser (Code blocks, Display Math, Headings, Rules, Blockquotes, Tables, ASCII art, and prose)
 
     public static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
@@ -307,8 +539,80 @@ public struct MarkdownMessageView: View {
 
         while idx < lines.count {
             let line = lines[idx]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-            // 1. Check for ASCII box-drawing or `+---+---+` table blocks
+            // 1. Horizontal Rule (`---`, `***`, `___`)
+            if isHorizontalRuleLine(trimmed) {
+                flushNormalBuffer()
+                blocks.append(.horizontalRule(id: nextId))
+                nextId += 1
+                idx += 1
+                continue
+            }
+
+            // 2. Markdown Heading (`# `, `## `, `### `, `#### `)
+            if let (level, title) = parseHeadingLine(trimmed) {
+                flushNormalBuffer()
+                blocks.append(.heading(id: nextId, level: level, title: title))
+                nextId += 1
+                idx += 1
+                continue
+            }
+
+            // 3. Display Math Block (`$$ ... $$` or `\[ ... \]`)
+            if trimmed.hasPrefix("$$") || trimmed.hasPrefix("\\[") {
+                let closingToken = trimmed.hasPrefix("$$") ? "$$" : "\\]"
+                let openToken = trimmed.hasPrefix("$$") ? "$$" : "\\["
+                if trimmed.count > openToken.count && trimmed.hasSuffix(closingToken) {
+                    flushNormalBuffer()
+                    let inner = String(trimmed.dropFirst(openToken.count).dropLast(closingToken.count))
+                    blocks.append(.mathBlock(id: nextId, latex: inner))
+                    nextId += 1
+                    idx += 1
+                    continue
+                } else {
+                    var mathLines: [String] = [String(trimmed.dropFirst(openToken.count))]
+                    var j = idx + 1
+                    while j < lines.count {
+                        let candidate = lines[j].trimmingCharacters(in: .whitespaces)
+                        if candidate.hasSuffix(closingToken) {
+                            mathLines.append(String(candidate.dropLast(closingToken.count)))
+                            j += 1
+                            break
+                        } else {
+                            mathLines.append(lines[j])
+                            j += 1
+                        }
+                    }
+                    flushNormalBuffer()
+                    blocks.append(.mathBlock(id: nextId, latex: mathLines.joined(separator: "\n")))
+                    nextId += 1
+                    idx = j
+                    continue
+                }
+            }
+
+            // 4. Blockquote (`> ...`)
+            if trimmed.hasPrefix(">") {
+                var quoteLines: [String] = []
+                var j = idx
+                while j < lines.count {
+                    let qt = lines[j].trimmingCharacters(in: .whitespaces)
+                    if qt.hasPrefix(">") {
+                        quoteLines.append(String(qt.dropFirst()).trimmingCharacters(in: .whitespaces))
+                        j += 1
+                    } else {
+                        break
+                    }
+                }
+                flushNormalBuffer()
+                blocks.append(.blockquote(id: nextId, content: quoteLines.joined(separator: "\n")))
+                nextId += 1
+                idx = j
+                continue
+            }
+
+            // 5. Check for ASCII box-drawing or `+---+---+` table blocks
             if isASCIIBoxTableLine(line) {
                 var asciiLines: [String] = [line]
                 var j = idx + 1
@@ -325,7 +629,7 @@ public struct MarkdownMessageView: View {
                 }
             }
 
-            // 2. Check for Markdown Pipe Table (`| Header | ... |` followed by `| --- | --- |`)
+            // 6. Check for Markdown Pipe Table (`| Header | ... |` followed by `| --- | --- |`)
             if idx + 1 < lines.count,
                isPipeRowLine(line),
                isMarkdownTableSeparatorLine(lines[idx + 1]) {
@@ -356,15 +660,35 @@ public struct MarkdownMessageView: View {
         flushNormalBuffer()
     }
 
+    private static func isHorizontalRuleLine(_ trimmed: String) -> Bool {
+        guard trimmed.count >= 3 else { return false }
+        let chars = Set(trimmed.filter { !$0.isWhitespace })
+        if chars.count == 1, let only = chars.first, (only == "-" || only == "*" || only == "_") {
+            return trimmed.filter { $0 == only }.count >= 3
+        }
+        return false
+    }
+
+    private static func parseHeadingLine(_ trimmed: String) -> (Int, String)? {
+        guard trimmed.hasPrefix("#") else { return nil }
+        var level = 0
+        for ch in trimmed {
+            if ch == "#" { level += 1 } else { break }
+        }
+        guard (1...6).contains(level) else { return nil }
+        let rest = String(trimmed.dropFirst(level))
+        guard rest.first == " " else { return nil }
+        let title = rest.trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? nil : (level, title)
+    }
+
     private static func isASCIIBoxTableLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
-        // Box drawing characters: ┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ │ ─ ╔ ╦ ╗ ╠ ╬ ╣ ╚ ╩ ╝ ║ ═
         let boxChars = CharacterSet(charactersIn: "┌┬┐├┼┤└┴┘│─╔╦╗╠╬╣╚╩╝║═")
         if trimmed.unicodeScalars.contains(where: { boxChars.contains($0) }) {
             return true
         }
-        // Classic ASCII `+---+---+` border line
         if trimmed.hasPrefix("+") && trimmed.hasSuffix("+") && trimmed.contains("-") {
             return true
         }

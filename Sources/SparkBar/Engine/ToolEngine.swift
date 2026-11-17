@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import WebKit
 
 /// Lightweight native Swift implementation of Hermes Agent / OpenCode tool schemas and execution.
 public enum ToolRegistry {
@@ -226,7 +227,7 @@ public enum ToolExecutor {
         NSString(string: path).expandingTildeInPath
     }
 
-    // MARK: - Web Search (DuckDuckGo Lite HTML + Instant Answer API)
+    // MARK: - Web Search (Native WKWebView Search + Wikipedia / HN API Fallbacks)
 
     private static func performWebSearch(query: String) async -> (String, Bool) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -234,52 +235,54 @@ public enum ToolExecutor {
             return ("Error: Empty search query.", true)
         }
 
-        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://html.duckduckgo.com/html/?q=\(encoded)") else {
+        // 1. Primary: Native offscreen WKWebView search (executes with a real macOS Safari WebKit engine)
+        if let webKitResults = await WebKitSearchRunner.search(query: trimmed),
+           !webKitResults.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return (webKitResults, false)
+        }
+
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return ("Error: Invalid search query.", true)
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 12
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
+        // 2. Fallback: Wikipedia Search API + HackerNews Algolia API
+        var combinedResults: [String] = []
 
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            let html = String(data: data, encoding: .utf8) ?? ""
-            let parsed = parseDuckDuckGoHTML(html, maxResults: 6)
-            if !parsed.isEmpty {
-                return (parsed, false)
-            }
-
-            // Fallback to DuckDuckGo Instant Answer JSON API
-            if let apiURL = URL(string: "https://api.duckduckgo.com/?q=\(encoded)&format=json&no_html=1") {
-                let (apiData, _) = try await URLSession.shared.data(from: apiURL)
-                if let json = try? JSONSerialization.jsonObject(with: apiData) as? [String: Any] {
-                    var summaryParts: [String] = []
-                    if let abstract = json["AbstractText"] as? String, !abstract.isEmpty {
-                        summaryParts.append("Summary: \(abstract)")
-                    }
-                    if let related = json["RelatedTopics"] as? [[String: Any]] {
-                        for topic in related.prefix(5) {
-                            if let text = topic["Text"] as? String,
-                               let firstURL = topic["FirstURL"] as? String {
-                                summaryParts.append("- \(text) (\(firstURL))")
-                            }
-                        }
-                    }
-                    if !summaryParts.isEmpty {
-                        return (summaryParts.joined(separator: "\n"), false)
+        if let wikiURL = URL(string: "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=\(encoded)&format=json") {
+            if let (wikiData, _) = try? await URLSession.shared.data(from: wikiURL),
+               let json = try? JSONSerialization.jsonObject(with: wikiData) as? [String: Any],
+               let queryDict = json["query"] as? [String: Any],
+               let searchArr = queryDict["search"] as? [[String: Any]] {
+                for item in searchArr.prefix(4) {
+                    let title = item["title"] as? String ?? ""
+                    let snippet = stripHTMLTags(item["snippet"] as? String ?? "")
+                    let pageURL = "https://en.wikipedia.org/wiki/" + (title.replacingOccurrences(of: " ", with: "_").addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")
+                    if !title.isEmpty {
+                        combinedResults.append("• [Wikipedia] \(title)\n  URL: \(pageURL)\n  Snippet: \(snippet)")
                     }
                 }
             }
-
-            return ("No web search results found for '\(trimmed)'.", false)
-        } catch {
-            return ("Web search failed: \(error.localizedDescription)", true)
         }
+
+        if let hnURL = URL(string: "https://hn.algolia.com/api/v1/search?query=\(encoded)&hitsPerPage=4") {
+            if let (hnData, _) = try? await URLSession.shared.data(from: hnURL),
+               let json = try? JSONSerialization.jsonObject(with: hnData) as? [String: Any],
+               let hits = json["hits"] as? [[String: Any]] {
+                for hit in hits.prefix(4) {
+                    let title = hit["title"] as? String ?? ""
+                    let url = hit["url"] as? String ?? ""
+                    if !title.isEmpty && !url.isEmpty {
+                        combinedResults.append("• \(title)\n  URL: \(url)")
+                    }
+                }
+            }
+        }
+
+        if !combinedResults.isEmpty {
+            return (combinedResults.joined(separator: "\n\n"), false)
+        }
+
+        return ("search_failed: Unable to retrieve search results for '\(trimmed)'.", true)
     }
 
     public static func parseDuckDuckGoHTML(_ html: String, maxResults: Int = 6) -> String {
@@ -487,6 +490,97 @@ private extension Optional {
         switch self {
         case .some(let val): return val
         case .none: return fallback()
+        }
+    }
+}
+
+/// Uses an offscreen macOS `WKWebView` instance to load search results in a real WebKit engine and extract organic titles, URLs, and snippets.
+@MainActor
+public final class WebKitSearchRunner: NSObject, WKNavigationDelegate {
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var timeoutTask: Task<Void, Never>?
+
+    public static func search(query: String) async -> String? {
+        let runner = WebKitSearchRunner()
+        return await runner.run(query: query)
+    }
+
+    private func run(query: String) async -> String? {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://duckduckgo.com/?q=\(encoded)&ia=web") else {
+            return nil
+        }
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            self.continuation = cont
+
+            let config = WKWebViewConfiguration()
+            let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 768), configuration: config)
+            wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+            wv.navigationDelegate = self
+            self.webView = wv
+
+            wv.load(URLRequest(url: url, timeoutInterval: 10))
+
+            self.timeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 8_500_000_000)
+                self?.finish(with: nil)
+            }
+        }
+    }
+
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor [weak self] in
+            // Wait briefly for client-side organic results DOM hydration
+            try? await Task.sleep(nanoseconds: 1_300_000_000)
+            guard let self = self, self.continuation != nil else { return }
+
+            let js = #"""
+            (() => {
+                const items = [];
+                const articles = document.querySelectorAll('article[data-testid="result"], li[data-layout="organic"], .react-results--main li');
+                for (const el of articles) {
+                    const titleLink = el.querySelector('h2 a, a[data-testid="result-title-a"]');
+                    if (!titleLink) continue;
+                    const title = titleLink.innerText.trim();
+                    const href = titleLink.href || '';
+                    if (!title || !href || href.includes('duckduckgo.com/y.js')) continue;
+                    const snippetEl = el.querySelector('[data-result="snippet"], .OgdwYG6KE2qthn9XQWFC');
+                    const snippet = snippetEl ? snippetEl.innerText.trim() : el.innerText.replace(/\s+/g, ' ').trim();
+                    items.push("• " + title + "\n  URL: " + href + "\n  Snippet: " + snippet);
+                    if (items.length >= 7) break;
+                }
+                return items.join("\n\n");
+            })()
+            """#
+
+            do {
+                let res = try await webView.evaluateJavaScript(js) as? String
+                self.finish(with: res)
+            } catch {
+                self.finish(with: nil)
+            }
+        }
+    }
+
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finish(with: nil)
+    }
+
+    public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        finish(with: nil)
+    }
+
+    private func finish(with result: String?) {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView = nil
+        if let cont = continuation {
+            continuation = nil
+            cont.resume(returning: result)
         }
     }
 }

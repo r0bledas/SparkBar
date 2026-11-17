@@ -19,7 +19,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
-                .linkedFramework("Security")
+                .linkedFramework("Security"),
+                .linkedFramework("WebKit")
             ]
         ),
         .testTarget(
