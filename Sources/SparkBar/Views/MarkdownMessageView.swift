@@ -1,5 +1,127 @@
 import SwiftUI
 import AppKit
+import WebKit
+
+/// Native KaTeX WebKit MathView for crisp, real LaTeX mathematical typesetting (fractions, matrices, integrals, roots).
+public struct NativeLaTeXBlockView: NSViewRepresentable {
+    public let latex: String
+    @Binding public var dynamicHeight: CGFloat
+
+    public init(latex: String, dynamicHeight: Binding<CGFloat>) {
+        self.latex = latex
+        self._dynamicHeight = dynamicHeight
+    }
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    public func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let wv = NonScrollingWKWebView(frame: .zero, configuration: config)
+        wv.setValue(false, forKey: "drawsBackground")
+        wv.navigationDelegate = context.coordinator
+        context.coordinator.lastLoadedLatex = latex
+        wv.loadHTMLString(Self.htmlTemplate(for: latex), baseURL: URL(string: "https://cdn.jsdelivr.net"))
+        return wv
+    }
+
+    public func updateNSView(_ nsView: WKWebView, context: Context) {
+        if context.coordinator.lastLoadedLatex != latex {
+            context.coordinator.lastLoadedLatex = latex
+            nsView.loadHTMLString(Self.htmlTemplate(for: latex), baseURL: URL(string: "https://cdn.jsdelivr.net"))
+        }
+    }
+
+    public final class NonScrollingWKWebView: WKWebView {
+        public override func scrollWheel(with event: NSEvent) {
+            nextResponder?.scrollWheel(with: event)
+        }
+    }
+
+    public final class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: NativeLaTeXBlockView
+        var lastLoadedLatex: String = ""
+
+        init(_ parent: NativeLaTeXBlockView) {
+            self.parent = parent
+        }
+
+        public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                if let h = try? await webView.evaluateJavaScript("document.getElementById('math-root').scrollHeight") as? CGFloat, h > 10 {
+                    parent.dynamicHeight = min(max(h + 16, 44), 320)
+                }
+            }
+        }
+    }
+
+    private static func htmlTemplate(for rawLatex: String) -> String {
+        let escaped = rawLatex
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "`", with: "\\`")
+            .replacingOccurrences(of: "$", with: "\\$")
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+        <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+        <style>
+            * { box-sizing: border-box; }
+            html, body {
+                margin: 0;
+                padding: 0;
+                background: transparent;
+                color: rgba(255, 255, 255, 0.94);
+                font-family: -apple-system, BlinkMacSystemFont, serif;
+                overflow-x: auto;
+                overflow-y: hidden;
+            }
+            #math-root {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 8px 12px;
+                font-size: 1.08em;
+            }
+        </style>
+        </head>
+        <body>
+        <div id="math-root"></div>
+        <script>
+            try {
+                katex.render(`\(escaped)`, document.getElementById('math-root'), {
+                    displayMode: true,
+                    throwOnError: false
+                });
+            } catch (e) {
+                document.getElementById('math-root').innerText = `\(escaped)`;
+            }
+        </script>
+        </body>
+        </html>
+        """
+    }
+}
+
+public struct MathBlockContainerView: View {
+    public let latex: String
+    @State private var height: CGFloat = 56
+
+    public var body: some View {
+        NativeLaTeXBlockView(latex: latex, dynamicHeight: $height)
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+            )
+    }
+}
 
 /// Native macOS Visual Effect blur material wrapper for our Spotlight panel.
 public struct VisualEffectBlur: NSViewRepresentable {
@@ -98,22 +220,7 @@ public struct MarkdownMessageView: View {
                     .padding(.vertical, 2)
 
                 case .mathBlock(_, let latex):
-                    HStack {
-                        Spacer(minLength: 8)
-                        Text(Self.renderLaTeXToUnicode(latex))
-                            .font(.system(size: 15, weight: .medium, design: .serif))
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.center)
-                            .textSelection(.enabled)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                        Spacer(minLength: 8)
-                    }
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
-                    )
+                    MathBlockContainerView(latex: latex)
 
                 case .table(_, let headers, let rows, _):
                     renderedMarkdownTable(headers: headers, rows: rows)
@@ -349,39 +456,6 @@ public struct MarkdownMessageView: View {
     public static func renderLaTeXToUnicode(_ latex: String) -> String {
         var s = latex.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // `\frac{a}{b}` -> `(a)/(b)`
-        s = replaceTwoArgMacro(in: s, macro: "\\frac") { a, b in
-            let left = a.count == 1 ? a : "(\(a))"
-            let right = b.count == 1 ? b : "(\(b))"
-            return "\(left)⁄\(right)"
-        }
-
-        // `\sqrt{x}` -> `√(x)`
-        s = replaceOneArgMacro(in: s, macro: "\\sqrt") { x in
-            x.count == 1 ? "√\(x)" : "√(\(x))"
-        }
-
-        // Text / formatting macros `\text{...}`, `\mathrm{...}`, `\mathbf{...}`
-        for macro in ["\\text", "\\mathrm", "\\mathbf", "\\mathit", "\\mathcal", "\\operatorname"] {
-            s = replaceOneArgMacro(in: s, macro: macro) { $0 }
-        }
-
-        // Superscripts `^{...}` and `^x`
-        s = replaceRegexMatches(in: s, pattern: #"\^\{([^\}]+)\}"#) { exp in
-            mapSuperscript(exp)
-        }
-        s = replaceRegexMatches(in: s, pattern: #"\^([0-9a-zA-Z\+\-\=])"#) { exp in
-            mapSuperscript(exp)
-        }
-
-        // Subscripts `_{...}` and `_x`
-        s = replaceRegexMatches(in: s, pattern: #"_\{([^\}]+)\}"#) { sub in
-            mapSubscript(sub)
-        }
-        s = replaceRegexMatches(in: s, pattern: #"_([0-9a-zA-Z\+\-\=])"#) { sub in
-            mapSubscript(sub)
-        }
-
         let symbolMap: [(String, String)] = [
             ("\\left(", "("), ("\\right)", ")"),
             ("\\left[", "["), ("\\right]", "]"),
@@ -415,6 +489,39 @@ public struct MarkdownMessageView: View {
             s = s.replacingOccurrences(of: cmd, with: sym)
         }
 
+        // Superscripts `^{...}` and `^x`
+        s = replaceRegexMatches(in: s, pattern: #"\^\{([^{}]+)\}"#) { exp in
+            mapSuperscript(exp)
+        }
+        s = replaceRegexMatches(in: s, pattern: #"\^([0-9a-zA-Z\+\-\=])"#) { exp in
+            mapSuperscript(exp)
+        }
+
+        // Subscripts `_{...}` and `_x`
+        s = replaceRegexMatches(in: s, pattern: #"_\{([^{}]+)\}"#) { sub in
+            mapSubscript(sub)
+        }
+        s = replaceRegexMatches(in: s, pattern: #"_([0-9a-zA-Z\+\-\=])"#) { sub in
+            mapSubscript(sub)
+        }
+
+        // Text / formatting macros `\text{...}`, `\mathrm{...}`, `\mathbf{...}`
+        for macro in ["\\text", "\\mathrm", "\\mathbf", "\\mathit", "\\mathcal", "\\operatorname"] {
+            s = replaceOneArgMacro(in: s, macro: macro) { $0 }
+        }
+
+        // `\sqrt{x}` -> `√(x)` (inside-out)
+        s = replaceOneArgMacro(in: s, macro: "\\sqrt") { x in
+            x.count <= 2 ? "√\(x)" : "√(\(x))"
+        }
+
+        // `\frac{a}{b}` -> `(a)/(b)` (inside-out)
+        s = replaceTwoArgMacro(in: s, macro: "\\frac") { a, b in
+            let left = a.count <= 2 ? a : "(\(a))"
+            let right = b.count <= 2 ? b : "(\(b))"
+            return "\(left)/\(right)"
+        }
+
         // Remove leftover curly braces used for grouping
         s = s.replacingOccurrences(of: "{", with: "").replacingOccurrences(of: "}", with: "")
         return s
@@ -422,21 +529,30 @@ public struct MarkdownMessageView: View {
 
     private static func replaceOneArgMacro(in text: String, macro: String, transform: (String) -> String) -> String {
         let escaped = NSRegularExpression.escapedPattern(for: macro)
-        return replaceRegexMatches(in: text, pattern: "\(escaped)\\{([^\\}]*)\\}", transform: transform)
+        var out = text
+        for _ in 0..<5 {
+            let next = replaceRegexMatches(in: out, pattern: "\(escaped)\\{([^{}]*)\\}", transform: transform)
+            if next == out { break }
+            out = next
+        }
+        return out
     }
 
     private static func replaceTwoArgMacro(in text: String, macro: String, transform: (String, String) -> String) -> String {
         let escaped = NSRegularExpression.escapedPattern(for: macro)
-        guard let regex = try? NSRegularExpression(pattern: "\(escaped)\\{([^\\}]*)\\}\\{([^\\}]*)\\}") else { return text }
+        guard let regex = try? NSRegularExpression(pattern: "\(escaped)\\{([^{}]*)\\}\\{([^{}]*)\\}") else { return text }
         var out = text
-        let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
-        for match in matches {
-            if match.numberOfRanges >= 3,
-               let fullRange = Range(match.range(at: 0), in: out),
-               let r1 = Range(match.range(at: 1), in: out),
-               let r2 = Range(match.range(at: 2), in: out) {
-                let rep = transform(String(out[r1]), String(out[r2]))
-                out.replaceSubrange(fullRange, with: rep)
+        for _ in 0..<5 {
+            let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
+            if matches.isEmpty { break }
+            for match in matches {
+                if match.numberOfRanges >= 3,
+                   let fullRange = Range(match.range(at: 0), in: out),
+                   let r1 = Range(match.range(at: 1), in: out),
+                   let r2 = Range(match.range(at: 2), in: out) {
+                    let rep = transform(String(out[r1]), String(out[r2]))
+                    out.replaceSubrange(fullRange, with: rep)
+                }
             }
         }
         return out
@@ -588,6 +704,18 @@ public struct MarkdownMessageView: View {
                     blocks.append(.mathBlock(id: nextId, latex: mathLines.joined(separator: "\n")))
                     nextId += 1
                     idx = j
+                    continue
+                }
+            }
+
+            // 3b. Standalone single-line `$ ... $` equation line -> render in full KaTeX MathBlock
+            if trimmed.hasPrefix("$") && trimmed.hasSuffix("$") && !trimmed.hasPrefix("$$") && trimmed.count > 2 {
+                let inner = String(trimmed.dropFirst().dropLast())
+                if !inner.contains("$") {
+                    flushNormalBuffer()
+                    blocks.append(.mathBlock(id: nextId, latex: inner))
+                    nextId += 1
+                    idx += 1
                     continue
                 }
             }

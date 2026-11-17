@@ -300,8 +300,8 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
         let visibleFrame = screen.visibleFrame
         let x = round(visibleFrame.origin.x + (visibleFrame.width - Self.panelWidth) / 2.0)
-        // Lock the bottom edge near the middle-bottom of the screen (22% above bottom of visible screen)
-        let y = round(visibleFrame.origin.y + visibleFrame.height * 0.22)
+        // Lock the bottom edge at 75% of the previous 0.22 height (0.22 * 0.75 = 0.165 above bottom of visible screen)
+        let y = round(visibleFrame.origin.y + visibleFrame.height * 0.165)
         return NSPoint(x: x, y: y)
     }
 
