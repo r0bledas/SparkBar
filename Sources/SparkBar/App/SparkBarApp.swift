@@ -190,8 +190,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusBarItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "bolt.horizontal.fill", accessibilityDescription: "SparkBar")
-            button.image?.isTemplate = true
+            button.image = SparkBarIconRenderer.makeImage(size: 18, isTemplate: true)
+            button.image?.accessibilityDescription = "SparkBar"
         }
 
         let menu = NSMenu()

@@ -98,7 +98,12 @@ public struct FloatingPromptView: View {
     // MARK: - Prompt Input Bar (Directly above Bottom Control Bar)
 
     private var promptInputBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
+            SparkBarLogoView(
+                size: 21,
+                isActive: viewModel.isStreaming || !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16.5, weight: .regular))

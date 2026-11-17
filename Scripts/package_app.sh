@@ -21,6 +21,12 @@ cp "AGENTS.md" "${RESOURCES_DIR}/AGENTS.md"
 if [ -f "Assets/AppIcon.icns" ]; then
     cp "Assets/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 fi
+if [ -f "Assets/SparkBarSymbol.pdf" ]; then
+    cp "Assets/SparkBarSymbol.pdf" "${RESOURCES_DIR}/SparkBarSymbol.pdf"
+fi
+if [ -f "Assets/SparkBarSymbol.svg" ]; then
+    cp "Assets/SparkBarSymbol.svg" "${RESOURCES_DIR}/SparkBarSymbol.svg"
+fi
 
 cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
