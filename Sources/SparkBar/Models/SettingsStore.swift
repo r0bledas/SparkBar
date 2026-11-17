@@ -8,12 +8,36 @@ public final class SettingsStore: ObservableObject {
     @Published public var selectedProvider: LLMProviderType {
         didSet {
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: "sparkbar.selectedProvider")
+            Task {
+                await refreshModelsForCurrentProvider()
+            }
         }
     }
 
+    /// Stores the active model ID per provider (dynamically populated from the API `/models` endpoint)
     @Published public var selectedModels: [String: String] {
         didSet {
             UserDefaults.standard.set(selectedModels, forKey: "sparkbar.selectedModels")
+            syncEffortLevelWithCurrentModel()
+        }
+    }
+
+    /// Dynamically fetched models from `GET /models` for the active provider
+    @Published public var availableModels: [RemoteModelInfo] = []
+
+    /// Active reasoning effort level (e.g. "low", "high", "max") discovered from the model's API metadata
+    @Published public var reasoningEffort: String {
+        didSet {
+            UserDefaults.standard.set(reasoningEffort, forKey: "sparkbar.reasoningEffort")
+        }
+    }
+
+    @Published public var isFetchingModels: Bool = false
+
+    /// Option in Settings to show or hide the AI Provider selector in the main floating bar (defaults to false so DeepSeek-only workflow is clean)
+    @Published public var showProviderInMainBar: Bool {
+        didSet {
+            UserDefaults.standard.set(showProviderInMainBar, forKey: "sparkbar.showProviderInMainBar")
         }
     }
 
@@ -82,15 +106,7 @@ public final class SettingsStore: ObservableObject {
         let providerRaw = defaults.string(forKey: "sparkbar.selectedProvider") ?? LLMProviderType.deepseek.rawValue
         self.selectedProvider = LLMProviderType(rawValue: providerRaw) ?? .deepseek
 
-        if let savedModels = defaults.dictionary(forKey: "sparkbar.selectedModels") as? [String: String] {
-            self.selectedModels = savedModels
-        } else {
-            var initial: [String: String] = [:]
-            for provider in LLMProviderType.allCases {
-                initial[provider.rawValue] = provider.defaultModel
-            }
-            self.selectedModels = initial
-        }
+        self.selectedModels = (defaults.dictionary(forKey: "sparkbar.selectedModels") as? [String: String]) ?? [:]
 
         if let savedEndpoints = defaults.dictionary(forKey: "sparkbar.customEndpoints") as? [String: String] {
             self.customEndpoints = savedEndpoints
@@ -101,6 +117,9 @@ public final class SettingsStore: ObservableObject {
             }
             self.customEndpoints = initialEndpoints
         }
+
+        self.reasoningEffort = defaults.string(forKey: "sparkbar.reasoningEffort") ?? "high"
+        self.showProviderInMainBar = defaults.object(forKey: "sparkbar.showProviderInMainBar") as? Bool ?? false
 
         self.systemPrompt = defaults.string(forKey: "sparkbar.systemPrompt") ?? """
         You are SparkBar, an ultra-fast, lightweight native macOS assistant and autonomous tool agent inspired by Hermes Agent and OpenCode.
@@ -118,15 +137,33 @@ public final class SettingsStore: ObservableObject {
         self.temperature = defaults.object(forKey: "sparkbar.temperature") as? Double ?? 0.3
 
         bootstrapLocalKeysIfNeeded()
+
+        Task {
+            await refreshModelsForCurrentProvider()
+        }
     }
 
     public var currentModel: String {
         get {
-            selectedModels[selectedProvider.rawValue] ?? selectedProvider.defaultModel
+            if let saved = selectedModels[selectedProvider.rawValue], !saved.isEmpty {
+                // Verify saved model exists in availableModels if availableModels is already loaded
+                if availableModels.isEmpty || availableModels.contains(where: { $0.id == saved }) {
+                    return saved
+                }
+            }
+            return availableModels.first?.id ?? ""
         }
         set {
             selectedModels[selectedProvider.rawValue] = newValue
         }
+    }
+
+    public var currentModelInfo: RemoteModelInfo? {
+        availableModels.first(where: { $0.id == currentModel }) ?? availableModels.first
+    }
+
+    public var supportedEffortLevelsForCurrentModel: [String] {
+        currentModelInfo?.supportedEffortLevels ?? []
     }
 
     public var currentBaseURL: String {
@@ -145,10 +182,64 @@ public final class SettingsStore: ObservableObject {
     public func setAPIKey(_ key: String, for provider: LLMProviderType) {
         KeychainHelper.saveKey(key, for: provider.rawValue)
         objectWillChange.send()
+        Task {
+            await refreshModelsForCurrentProvider()
+        }
+    }
+
+    /// Dynamically fetches the model list from the active provider's `/models` endpoint (Zero hardcoding).
+    public func refreshModelsForCurrentProvider() async {
+        let provider = selectedProvider
+        let baseURL = currentBaseURL
+        let key = apiKey(for: provider)
+
+        isFetchingModels = true
+        defer { isFetchingModels = false }
+
+        do {
+            let fetched = try await LLMStreamingClient.fetchRemoteModels(
+                baseURL: baseURL,
+                apiKey: key,
+                provider: provider
+            )
+            if !fetched.isEmpty {
+                self.availableModels = fetched
+                let existing = selectedModels[provider.rawValue] ?? ""
+                if existing.isEmpty || !fetched.contains(where: { $0.id == existing }) {
+                    selectedModels[provider.rawValue] = fetched.first?.id ?? ""
+                }
+                syncEffortLevelWithCurrentModel()
+            }
+        } catch {
+            // Keep existing models if offline or key not yet entered
+        }
+    }
+
+    private func syncEffortLevelWithCurrentModel() {
+        guard let info = currentModelInfo, !info.supportedEffortLevels.isEmpty else { return }
+        if !info.supportedEffortLevels.contains(reasoningEffort) {
+            reasoningEffort = info.defaultEffortLevel ?? info.supportedEffortLevels.first ?? "high"
+        }
+    }
+
+    /// Reads `AGENTS.md` to inject live workspace and environment context into the system prompt.
+    public func effectiveSystemPrompt() -> String {
+        var prompt = systemPrompt
+        let candidatePaths = [
+            FileManager.default.currentDirectoryPath + "/AGENTS.md",
+            "/Users/raudel/.gemini/antigravity/scratch/SparkBar/AGENTS.md",
+            Bundle.main.bundlePath + "/Contents/Resources/AGENTS.md"
+        ]
+        for path in candidatePaths {
+            if let agentsDoc = try? String(contentsOfFile: path, encoding: .utf8), !agentsDoc.isEmpty {
+                prompt += "\n\n---\n" + agentsDoc
+                break
+            }
+        }
+        return prompt
     }
 
     private func bootstrapLocalKeysIfNeeded() {
-        // If no DeepSeek key is stored yet, check if the user has deepseekapihermesandroid.txt in Downloads
         if KeychainHelper.loadKey(for: LLMProviderType.deepseek.rawValue).isEmpty {
             let home = FileManager.default.homeDirectoryForCurrentUser
             let candidate = home.appendingPathComponent("Downloads/deepseekapihermesandroid.txt")

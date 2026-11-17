@@ -27,9 +27,9 @@ public struct SettingsSheetView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Provider Picker
+                    // Provider Picker (Moved into Settings, default DeepSeek)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("AI Provider")
+                        Text("Default AI Provider")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
 
@@ -43,6 +43,10 @@ public struct SettingsSheetView: View {
                         .onChange(of: settings.selectedProvider) { _, newProvider in
                             loadFields(for: newProvider)
                         }
+
+                        Toggle("Show AI Provider picker in the main floating bar", isOn: $settings.showProviderInMainBar)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
                     }
 
                     // API Key Field
@@ -68,37 +72,71 @@ public struct SettingsSheetView: View {
                                         saveCurrentProviderFields()
                                     }
 
-                                Button("Save Key") {
+                                Button("Save & Fetch Models") {
                                     saveCurrentProviderFields()
                                 }
                             }
                         }
                     }
 
-                    // Model Selection
+                    // Dynamic API Models Selection
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Model Name")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            Text("Active Model (Dynamically Fetched from API `/models`)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                Task {
+                                    await settings.refreshModelsForCurrentProvider()
+                                    modelInput = settings.currentModel
+                                }
+                            } label: {
+                                Label(settings.isFetchingModels ? "Fetching…" : "Refresh API Models", systemImage: "arrow.clockwise")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.link)
+                        }
 
                         HStack(spacing: 8) {
-                            TextField("Model ID", text: $modelInput)
+                            TextField("Model ID (fetched from API)", text: $modelInput)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 12, design: .monospaced))
                                 .onChange(of: modelInput) { _, newValue in
                                     settings.currentModel = newValue
                                 }
 
-                            Menu("Presets") {
-                                ForEach(settings.selectedProvider.suggestedModels, id: \.self) { preset in
-                                    Button(preset) {
-                                        modelInput = preset
-                                        settings.currentModel = preset
+                            if !settings.availableModels.isEmpty {
+                                Menu("API Models (\(settings.availableModels.count))") {
+                                    ForEach(settings.availableModels) { m in
+                                        Button(m.displayLabel) {
+                                            modelInput = m.id
+                                            settings.currentModel = m.id
+                                        }
                                     }
                                 }
+                                .frame(width: 150)
                             }
-                            .frame(width: 90)
                         }
+                    }
+
+                    // Reasoning Effort Level
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Default Reasoning Effort")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
+                        let levels = settings.supportedEffortLevelsForCurrentModel.isEmpty
+                            ? ["low", "high", "max"]
+                            : settings.supportedEffortLevelsForCurrentModel
+
+                        Picker("Reasoning Effort", selection: $settings.reasoningEffort) {
+                            ForEach(levels, id: \.self) { level in
+                                Text(level.capitalized).tag(level)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
                     }
 
                     // Endpoint URL
@@ -111,6 +149,10 @@ public struct SettingsSheetView: View {
                             Button("Reset Default") {
                                 baseURLInput = settings.selectedProvider.defaultBaseURL
                                 settings.currentBaseURL = baseURLInput
+                                Task {
+                                    await settings.refreshModelsForCurrentProvider()
+                                    modelInput = settings.currentModel
+                                }
                             }
                             .buttonStyle(.link)
                             .font(.system(size: 11))
@@ -146,7 +188,7 @@ public struct SettingsSheetView: View {
                             .padding(.leading, 14)
                         }
 
-                        Toggle("Enable Server-Side Web Search (OpenRouter `:online` / DeepSeek)", isOn: $settings.enableServerSideSearch)
+                        Toggle("Enable Server-Side Web Search", isOn: $settings.enableServerSideSearch)
                             .font(.system(size: 13))
                     }
 
@@ -176,13 +218,13 @@ public struct SettingsSheetView: View {
             }
 
             if showSavedToast {
-                Text("Saved configuration!")
+                Text("Saved configuration & refreshed API models!")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.green)
             }
         }
         .padding(20)
-        .frame(width: 520, height: 500)
+        .frame(width: 540, height: 540)
         .onAppear {
             loadFields(for: settings.selectedProvider)
         }
@@ -190,13 +232,15 @@ public struct SettingsSheetView: View {
 
     private func loadFields(for provider: LLMProviderType) {
         apiKeyInput = settings.apiKey(for: provider)
-        modelInput = settings.selectedModels[provider.rawValue] ?? provider.defaultModel
+        modelInput = settings.currentModel
         baseURLInput = settings.customEndpoints[provider.rawValue] ?? provider.defaultBaseURL
     }
 
     private func saveCurrentProviderFields() {
         settings.setAPIKey(apiKeyInput, for: settings.selectedProvider)
-        settings.currentModel = modelInput
+        if !modelInput.isEmpty {
+            settings.currentModel = modelInput
+        }
         settings.currentBaseURL = baseURLInput
         showSavedToast = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {

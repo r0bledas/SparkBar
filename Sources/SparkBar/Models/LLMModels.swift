@@ -38,48 +38,6 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    public var defaultModel: String {
-        switch self {
-        case .deepseek: return "deepseek-chat"
-        case .openai: return "gpt-4o-mini"
-        case .openrouter: return "deepseek/deepseek-chat:online"
-        case .anthropic: return "claude-3-5-sonnet-latest"
-        case .groq: return "llama-3.3-70b-versatile"
-        case .gemini: return "gemini-2.5-flash"
-        case .ollama: return "qwen2.5-coder:7b"
-        case .custom: return "local-model"
-        }
-    }
-
-    public var suggestedModels: [String] {
-        switch self {
-        case .deepseek:
-            return ["deepseek-chat", "deepseek-reasoner"]
-        case .openai:
-            return ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "o3-mini"]
-        case .openrouter:
-            return [
-                "deepseek/deepseek-chat:online",
-                "deepseek/deepseek-chat",
-                "deepseek/deepseek-r1:online",
-                "anthropic/claude-3.5-sonnet:online",
-                "google/gemini-2.5-flash:online",
-                "perplexity/sonar-pro",
-                "openai/gpt-4o-mini"
-            ]
-        case .anthropic:
-            return ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-7-sonnet-latest"]
-        case .groq:
-            return ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "mixtral-8x7b-32768"]
-        case .gemini:
-            return ["gemini-2.5-flash", "gemini-2.5-pro"]
-        case .ollama:
-            return ["qwen2.5-coder:7b", "llama3.2", "deepseek-r1:8b", "mistral"]
-        case .custom:
-            return ["local-model"]
-        }
-    }
-
     public var requiresAPIKey: Bool {
         switch self {
         case .ollama: return false
@@ -94,6 +52,50 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
         default:
             return false
         }
+    }
+}
+
+/// Dynamic model metadata fetched live from `GET /models` — zero hardcoded model lists.
+public struct RemoteModelInfo: Identifiable, Codable, Equatable {
+    public var id: String
+    public var name: String?
+    public var ownedBy: String?
+    public var contextWindow: Int?
+    public var maxOutputTokens: Int?
+    public var supportedEffortLevels: [String]
+    public var defaultEffortLevel: String?
+
+    public init(
+        id: String,
+        name: String? = nil,
+        ownedBy: String? = nil,
+        contextWindow: Int? = nil,
+        maxOutputTokens: Int? = nil,
+        supportedEffortLevels: [String] = [],
+        defaultEffortLevel: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.ownedBy = ownedBy
+        self.contextWindow = contextWindow
+        self.maxOutputTokens = maxOutputTokens
+        self.supportedEffortLevels = supportedEffortLevels
+        self.defaultEffortLevel = defaultEffortLevel
+    }
+
+    /// Shows the actual API name alongside the API ID if both are provided by the server (e.g. `DeepSeek-V4.1-Flash (deepseek-flash)`).
+    public var displayLabel: String {
+        if let name = name, !name.isEmpty, name != id {
+            return "\(name) (\(id))"
+        }
+        return id
+    }
+
+    public var shortLabel: String {
+        if let name = name, !name.isEmpty {
+            return name
+        }
+        return id
     }
 }
 

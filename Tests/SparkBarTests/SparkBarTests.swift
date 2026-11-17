@@ -126,11 +126,23 @@ final class SparkBarTests: XCTestCase {
     }
 
     @MainActor
-    func testLiveDeepSeekStreamingIfKeyAvailable() async throws {
+    func testLiveDeepSeekDynamicModelDiscoveryAndStreaming() async throws {
         _ = SettingsStore.shared // triggers bootstrap
         let key = KeychainHelper.loadKey(for: LLMProviderType.deepseek.rawValue)
         guard !key.isEmpty else { return }
 
+        // 1. Dynamically discover models from GET /v1/models (Zero hardcoding)
+        let models = try await LLMStreamingClient.fetchRemoteModels(
+            baseURL: LLMProviderType.deepseek.defaultBaseURL,
+            apiKey: key,
+            provider: .deepseek
+        )
+        XCTAssertFalse(models.isEmpty, "Expected dynamic models from DeepSeek API")
+        let firstModel = models[0]
+        XCTAssertFalse(firstModel.id.isEmpty)
+        XCTAssertFalse(firstModel.supportedEffortLevels.isEmpty)
+
+        // 2. Stream a turn using the dynamically discovered model and reasoning effort
         let client = LLMStreamingClient()
         let userMsg = ChatMessage(role: .user, content: "Reply with the exact string SPARKBAR_OK and nothing else.")
         var streamed = ""
@@ -138,11 +150,12 @@ final class SparkBarTests: XCTestCase {
         let result = try await client.streamTurn(
             messages: [userMsg],
             provider: .deepseek,
-            model: "deepseek-chat",
+            model: firstModel.id,
             baseURL: LLMProviderType.deepseek.defaultBaseURL,
             apiKey: key,
             systemPrompt: "You are a helpful assistant.",
             temperature: 0.0,
+            reasoningEffort: firstModel.supportedEffortLevels.first ?? "low",
             enableServerSideSearch: false
         ) { partial, _ in
             streamed = partial

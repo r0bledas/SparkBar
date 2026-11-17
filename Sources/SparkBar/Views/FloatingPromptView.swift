@@ -334,13 +334,13 @@ public struct FloatingPromptView: View {
         }
     }
 
-    // MARK: - Bottom Control & Provider Bar
+    // MARK: - Bottom Control & Model / Reasoning Effort Bar
 
     private var bottomControlBar: some View {
-        HStack(spacing: 12) {
-            // Provider Quick Menu
-            Menu {
-                Section("AI Provider") {
+        HStack(spacing: 10) {
+            // Optional AI Provider Picker (Only shown if enabled in Settings)
+            if settings.showProviderInMainBar {
+                Menu {
                     ForEach(LLMProviderType.allCases) { provider in
                         Button {
                             settings.selectedProvider = provider
@@ -353,15 +353,78 @@ public struct FloatingPromptView: View {
                             }
                         }
                     }
+                } label: {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(hasValidKeyForCurrentProvider ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                        Text(settings.selectedProvider.displayName)
+                            .font(.system(size: 11.5, weight: .semibold))
+                    }
                 }
-                Section("Suggested Models (\(settings.selectedProvider.displayName))") {
-                    ForEach(settings.selectedProvider.suggestedModels, id: \.self) { preset in
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Select AI Provider")
+            }
+
+            // Dynamic Model Dropdown (Fetched directly from the API /models endpoint — zero hardcoding)
+            Menu {
+                if settings.availableModels.isEmpty {
+                    Button("Refresh Models from API…") {
+                        Task {
+                            await settings.refreshModelsForCurrentProvider()
+                        }
+                    }
+                } else {
+                    ForEach(settings.availableModels) { modelInfo in
                         Button {
-                            settings.currentModel = preset
+                            settings.currentModel = modelInfo.id
                         } label: {
                             HStack {
-                                Text(preset)
-                                if settings.currentModel == preset {
+                                Text(modelInfo.displayLabel)
+                                if settings.currentModel == modelInfo.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Refresh Models from API") {
+                        Task {
+                            await settings.refreshModelsForCurrentProvider()
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    if !settings.showProviderInMainBar {
+                        Circle()
+                            .fill(hasValidKeyForCurrentProvider ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                    }
+                    Text(currentModelBarLabel)
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Select Model (dynamically loaded from API)")
+
+            // Reasoning Effort Dropdown (low / high / max)
+            let effortLevels = settings.supportedEffortLevelsForCurrentModel.isEmpty
+                ? ["low", "high", "max"]
+                : settings.supportedEffortLevelsForCurrentModel
+
+            Menu {
+                Section("Reasoning Effort") {
+                    ForEach(effortLevels, id: \.self) { level in
+                        Button {
+                            settings.reasoningEffort = level
+                        } label: {
+                            HStack {
+                                Text(level.capitalized)
+                                if settings.reasoningEffort == level {
                                     Image(systemName: "checkmark")
                                 }
                             }
@@ -369,18 +432,20 @@ public struct FloatingPromptView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(hasValidKeyForCurrentProvider ? Color.green : Color.orange)
-                        .frame(width: 7, height: 7)
-                    Text("\(settings.selectedProvider.displayName) · \(settings.currentModel)")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .lineLimit(1)
+                HStack(spacing: 4) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 10.5))
+                    Text(settings.reasoningEffort.capitalized)
+                        .font(.system(size: 11, weight: .medium))
                 }
+                .foregroundStyle(Color.purple)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color.purple.opacity(0.14), in: Capsule())
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Select AI Provider & Model")
+            .help("Select Reasoning Effort")
 
             // Tools Quick Toggle
             Button {
@@ -388,8 +453,8 @@ public struct FloatingPromptView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
-                        .font(.system(size: 11))
-                    Text(settings.enableTools ? "Tools On" : "Tools Off")
+                        .font(.system(size: 10.5))
+                    Text("Tools")
                         .font(.system(size: 11, weight: .medium))
                 }
                 .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
@@ -409,7 +474,7 @@ public struct FloatingPromptView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "globe")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10.5))
                     Text("Web")
                         .font(.system(size: 11, weight: .medium))
                 }
@@ -457,6 +522,16 @@ public struct FloatingPromptView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
+    }
+
+    private var currentModelBarLabel: String {
+        if let info = settings.currentModelInfo {
+            return info.displayLabel
+        }
+        if !settings.currentModel.isEmpty {
+            return settings.currentModel
+        }
+        return settings.isFetchingModels ? "Loading models…" : "Select Model"
     }
 
     private var hasValidKeyForCurrentProvider: Bool {

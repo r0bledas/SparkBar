@@ -69,6 +69,7 @@ public final class ChatViewModel: ObservableObject {
             let model = settings.currentModel
             let baseURL = settings.currentBaseURL
             let apiKey = settings.apiKey(for: provider)
+            let effort: String? = settings.supportedEffortLevelsForCurrentModel.isEmpty ? nil : settings.reasoningEffort
 
             do {
                 let result = try await client.streamTurn(
@@ -77,8 +78,9 @@ public final class ChatViewModel: ObservableObject {
                     model: model,
                     baseURL: baseURL,
                     apiKey: apiKey,
-                    systemPrompt: settings.systemPrompt,
+                    systemPrompt: settings.effectiveSystemPrompt(),
                     temperature: settings.temperature,
+                    reasoningEffort: effort,
                     enableServerSideSearch: settings.enableServerSideSearch
                 ) { [weak self] partialContent, partialReasoning in
                     guard let self = self, assistantIndex < self.messages.count else { return }

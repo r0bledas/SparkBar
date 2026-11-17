@@ -15,6 +15,7 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 cp ".build/release/${APP_NAME}" "${MACOS_DIR}/${APP_NAME}"
 chmod +x "${MACOS_DIR}/${APP_NAME}"
+cp "AGENTS.md" "${RESOURCES_DIR}/AGENTS.md"
 
 cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

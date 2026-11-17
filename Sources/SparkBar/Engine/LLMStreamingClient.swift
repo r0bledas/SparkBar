@@ -30,6 +30,97 @@ public enum LLMClientError: LocalizedError {
 public final class LLMStreamingClient {
     public init() {}
 
+    /// Dynamically fetches the model list from `GET /models` (or `/v1/models`) and parses API ID, Name, Context Window, and Reasoning Effort levels.
+    public static func fetchRemoteModels(
+        baseURL: String,
+        apiKey: String,
+        provider: LLMProviderType
+    ) async throws -> [RemoteModelInfo] {
+        if provider.requiresAPIKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return []
+        }
+
+        let normalizedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        let modelsURLString = normalizedBase.hasSuffix("/models")
+            ? normalizedBase
+            : "\(normalizedBase)/models"
+
+        guard let url = URL(string: modelsURLString) else {
+            throw LLMClientError.invalidEndpoint(modelsURLString)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 12
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        if provider == .anthropic {
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        } else if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw LLMClientError.httpError(httpResponse.statusCode, body)
+        }
+
+        return parseModelsJSON(data)
+    }
+
+    public static func parseModelsJSON(_ data: Data) -> [RemoteModelInfo] {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+
+        let rawList: [[String: Any]]
+        if let dataArray = json["data"] as? [[String: Any]] {
+            rawList = dataArray
+        } else if let modelsArray = json["models"] as? [[String: Any]] {
+            rawList = modelsArray
+        } else {
+            return []
+        }
+
+        var models: [RemoteModelInfo] = []
+        for item in rawList {
+            guard let rawId = (item["id"] as? String) ?? (item["name"] as? String), !rawId.isEmpty else {
+                continue
+            }
+            let apiName = (item["name"] as? String) ?? (item["display_name"] as? String)
+            let ownedBy = item["owned_by"] as? String
+            let contextWindow = (item["context_window"] as? Int) ?? (item["context_length"] as? Int)
+            let maxOutput = item["max_output_tokens"] as? Int
+
+            var effortLevels: [String] = []
+            var defaultEffort: String? = nil
+
+            if let effortDict = item["effort"] as? [String: Any] {
+                if let levels = effortDict["supported_levels"] as? [String] {
+                    effortLevels = levels
+                }
+                defaultEffort = effortDict["default_level"] as? String
+            }
+
+            models.append(
+                RemoteModelInfo(
+                    id: rawId,
+                    name: apiName,
+                    ownedBy: ownedBy,
+                    contextWindow: contextWindow,
+                    maxOutputTokens: maxOutput,
+                    supportedEffortLevels: effortLevels,
+                    defaultEffortLevel: defaultEffort
+                )
+            )
+        }
+
+        return models
+    }
+
     /// Parses a single OpenAI-compatible `data: {...}` SSE JSON payload.
     public static func parseOpenAISSELine(
         _ line: String,
@@ -98,6 +189,7 @@ public final class LLMStreamingClient {
         apiKey: String,
         systemPrompt: String,
         temperature: Double,
+        reasoningEffort: String? = nil,
         enableServerSideSearch: Bool,
         onUpdate: @escaping @MainActor (String, String) -> Void
     ) async throws -> StreamDeltaResult {
@@ -105,10 +197,21 @@ public final class LLMStreamingClient {
             throw LLMClientError.missingAPIKey(provider.displayName)
         }
 
+        // If model has not been fetched yet, dynamically resolve it from the provider's /models endpoint
+        var activeModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if activeModel.isEmpty {
+            let discovered = try await Self.fetchRemoteModels(baseURL: baseURL, apiKey: apiKey, provider: provider)
+            if let first = discovered.first {
+                activeModel = first.id
+                SettingsStore.shared.availableModels = discovered
+                SettingsStore.shared.currentModel = first.id
+            }
+        }
+
         if provider == .anthropic {
             return try await streamAnthropicTurn(
                 messages: messages,
-                model: model,
+                model: activeModel,
                 baseURL: baseURL,
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
@@ -119,11 +222,12 @@ public final class LLMStreamingClient {
             return try await streamOpenAICompatibleTurn(
                 messages: messages,
                 provider: provider,
-                model: model,
+                model: activeModel,
                 baseURL: baseURL,
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
                 temperature: temperature,
+                reasoningEffort: reasoningEffort,
                 enableServerSideSearch: enableServerSideSearch,
                 onUpdate: onUpdate
             )
@@ -141,6 +245,7 @@ public final class LLMStreamingClient {
         apiKey: String,
         systemPrompt: String,
         temperature: Double,
+        reasoningEffort: String?,
         enableServerSideSearch: Bool,
         onUpdate: @escaping @MainActor (String, String) -> Void
     ) async throws -> StreamDeltaResult {
@@ -190,7 +295,7 @@ public final class LLMStreamingClient {
                 } else {
                     dict["content"] = ""
                 }
-                if let reasoning = msg.reasoningContent, !reasoning.isEmpty, model.contains("reasoner") {
+                if let reasoning = msg.reasoningContent, !reasoning.isEmpty {
                     dict["reasoning_content"] = reasoning
                 }
                 if let tcs = msg.toolCalls, !tcs.isEmpty {
@@ -226,12 +331,12 @@ public final class LLMStreamingClient {
             "stream": true
         ]
 
-        if !effectiveModel.contains("reasoner") && !effectiveModel.hasPrefix("o1") && !effectiveModel.hasPrefix("o3") {
-            body["temperature"] = temperature
+        if let effort = reasoningEffort, !effort.isEmpty {
+            body["reasoning_effort"] = effort
         }
 
         let tools = ToolRegistry.activeToolsJSON()
-        if !tools.isEmpty && !effectiveModel.contains("reasoner") {
+        if !tools.isEmpty {
             body["tools"] = tools
             body["tool_choice"] = "auto"
         }
