@@ -39,11 +39,7 @@ public struct FloatingPromptView: View {
                 .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
         )
         .padding(8)
-        .frame(width: 476)
-        .frame(
-            minHeight: visibleMessages.isEmpty && viewModel.errorMessage == nil ? 114 : 440,
-            maxHeight: 540
-        )
+        .frame(width: 540)
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }
@@ -118,13 +114,43 @@ public struct FloatingPromptView: View {
     private var conversationArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(visibleMessages) { msg in
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    let items = visibleMessages
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                         messageRow(for: msg)
                             .id(msg.id)
+
+                        if index < items.count - 1 {
+                            let nextMsg = items[index + 1]
+                            if isBotChainItem(msg) && isBotChainItem(nextMsg) {
+                                // White vertical connector line aligned after 2x the corner-rounding inset (12pt * 2 = 24pt)
+                                HStack(spacing: 0) {
+                                    Rectangle()
+                                        .fill(Color.white.opacity(0.38))
+                                        .frame(width: 2, height: 14)
+                                        .padding(.leading, 24)
+                                    Spacer()
+                                }
+                            } else {
+                                Spacer()
+                                    .frame(height: 12)
+                            }
+                        }
                     }
 
                     if let toolStatus = viewModel.activeToolStatus {
+                        if let last = items.last, isBotChainItem(last) {
+                            HStack(spacing: 0) {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.38))
+                                    .frame(width: 2, height: 14)
+                                    .padding(.leading, 24)
+                                Spacer()
+                            }
+                        } else if !items.isEmpty {
+                            Spacer().frame(height: 12)
+                        }
+
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
@@ -139,6 +165,7 @@ public struct FloatingPromptView: View {
                     }
 
                     if let error = viewModel.errorMessage {
+                        Spacer().frame(height: 12)
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
@@ -162,6 +189,7 @@ public struct FloatingPromptView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
             }
+            .frame(height: 330)
             .onChange(of: viewModel.messages.last?.content) { _, _ in
                 if let lastId = visibleMessages.last?.id {
                     proxy.scrollTo(lastId, anchor: .bottom)
@@ -175,6 +203,10 @@ public struct FloatingPromptView: View {
                 }
             }
         }
+    }
+
+    private func isBotChainItem(_ msg: ChatMessage) -> Bool {
+        msg.role == .assistant || msg.role == .tool
     }
 
     /// Chronological items to display in the stream:
@@ -508,7 +540,7 @@ public struct FloatingPromptView: View {
                 .frame(height: 13)
                 .opacity(0.6)
 
-            // Tools & Web grouped together without a separator between them (With hammer & globe icons restored)
+            // Tools & Web grouped together without a separator between them (fixedSize so they never wrap vertically)
             HStack(spacing: 6) {
                 Button {
                     settings.enableTools.toggle()
@@ -519,15 +551,17 @@ public struct FloatingPromptView: View {
                         Text("Tools")
                             .font(.system(size: 11, weight: .medium))
                     }
+                    .fixedSize()
                     .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.vertical, 4)
                     .background(
                         (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
                         in: Capsule()
                     )
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .help("Toggle autonomous tools (Web Search, Terminal, File I/O)")
 
                 Button {
@@ -539,21 +573,24 @@ public struct FloatingPromptView: View {
                         Text("Web")
                             .font(.system(size: 11, weight: .medium))
                     }
+                    .fixedSize()
                     .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.vertical, 4)
                     .background(
                         (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
                         in: Capsule()
                     )
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .help("Toggle live web search")
             }
+            .fixedSize()
 
             // Empty space in the bottom bar acts as a drag handle to move the window
             WindowDragHandle()
-                .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 28)
+                .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 24)
 
             if !viewModel.messages.isEmpty {
                 Button {
@@ -565,9 +602,11 @@ public struct FloatingPromptView: View {
                         Text("Clear")
                             .font(.system(size: 11))
                     }
+                    .fixedSize()
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .keyboardShortcut("k", modifiers: [.command])
                 .help("Clear conversation (⌘K)")
             }
@@ -580,12 +619,14 @@ public struct FloatingPromptView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .fixedSize()
             .keyboardShortcut(",", modifiers: [.command])
             .help("Settings & API Keys (⌘,)")
             .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
+        .frame(height: 38)
     }
 
     private var currentModelBarLabel: String {

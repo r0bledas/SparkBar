@@ -109,7 +109,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
     }
 
     public func setupPanel<Content: View>(with rootView: Content) {
-        let initialRect = NSRect(x: 0, y: 0, width: 476, height: 480)
+        let initialRect = NSRect(x: 0, y: 0, width: 540, height: 114)
         let panel = FloatingPanel(contentRect: initialRect)
         panel.delegate = self
         panel.onEscapePressed = { [weak self] in
