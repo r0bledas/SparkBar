@@ -46,11 +46,7 @@ public struct FloatingPromptView: View {
                 .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
         )
         .padding(8)
-        .frame(
-            width: PanelController.panelWidth,
-            height: hasActiveChatArea ? PanelController.maxExpandedHeight : PanelController.collapsedHeight,
-            alignment: .bottom
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }

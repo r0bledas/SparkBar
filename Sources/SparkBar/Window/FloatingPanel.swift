@@ -10,7 +10,7 @@ public final class FloatingPanel: NSPanel {
     public init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView],
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
@@ -18,17 +18,10 @@ public final class FloatingPanel: NSPanel {
         self.isFloatingPanel = true
         self.level = .floating
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        self.titleVisibility = .hidden
-        self.titlebarAppearsTransparent = true
         self.isMovableByWindowBackground = false
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = true
-
-        // Hide traffic light window buttons
-        self.standardWindowButton(.closeButton)?.isHidden = true
-        self.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        self.standardWindowButton(.zoomButton)?.isHidden = true
     }
 
     public override var canBecomeKey: Bool {
@@ -78,7 +71,11 @@ public final class FloatingPanel: NSPanel {
     }
 }
 
-/// Transparent AppKit view placed in the empty space of the bottom bar that allows moving the window by dragging.
+/// Custom drag handle placed in the empty space of the bottom bar.
+/// Supports:
+/// - Smooth window dragging
+/// - Holding `⌘ Command` while dragging to lock/align movement to the X or Y axis (or snap directly to the default X/Y axes)
+/// - Automatic magnetic snapping toward the default position (`defaultOrigin.x`, `defaultOrigin.y`, or both)
 public struct WindowDragHandle: NSViewRepresentable {
     public init() {}
 
@@ -89,10 +86,85 @@ public struct WindowDragHandle: NSViewRepresentable {
     public func updateNSView(_ nsView: DraggableNSView, context: Context) {}
 
     public final class DraggableNSView: NSView {
-        public override var mouseDownCanMoveWindow: Bool { true }
+        private var initialMouseLocation: NSPoint = .zero
+        private var initialWindowOrigin: NSPoint = .zero
+        private var lockedAxis: AxisLock? = nil
+
+        private enum AxisLock {
+            case horizontal // Y is locked, moves along X
+            case vertical   // X is locked, moves along Y
+        }
 
         public override func mouseDown(with event: NSEvent) {
-            window?.performDrag(with: event)
+            guard let window = self.window else { return }
+            initialMouseLocation = NSEvent.mouseLocation
+            initialWindowOrigin = window.frame.origin
+            lockedAxis = nil
+
+            let defaultOrigin = PanelController.shared.computeDefaultBottomAnchor()
+            let magnetThreshold: CGFloat = 24.0
+            let commandSnapThreshold: CGFloat = 64.0
+            var didSnapFeedback = false
+
+            // Track mouse dragging & modifier flags in real time
+            while let nextEvent = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .flagsChanged]) {
+                if nextEvent.type == .leftMouseUp {
+                    break
+                }
+
+                let currentMouse = NSEvent.mouseLocation
+                let dx = currentMouse.x - initialMouseLocation.x
+                let dy = currentMouse.y - initialMouseLocation.y
+
+                var proposedX = initialWindowOrigin.x + dx
+                var proposedY = initialWindowOrigin.y + dy
+
+                let isCommandDown = nextEvent.modifierFlags.contains(.command)
+
+                if isCommandDown {
+                    // Determine dominant drag axis if not already locked
+                    if lockedAxis == nil && (abs(dx) > 4 || abs(dy) > 4) {
+                        lockedAxis = abs(dx) >= abs(dy) ? .horizontal : .vertical
+                    }
+
+                    // If near the default X or Y axis while holding Command, snap directly onto the default axis line
+                    if abs(proposedX - defaultOrigin.x) < commandSnapThreshold {
+                        proposedX = defaultOrigin.x
+                    } else if lockedAxis == .vertical {
+                        proposedX = initialWindowOrigin.x
+                    }
+
+                    if abs(proposedY - defaultOrigin.y) < commandSnapThreshold {
+                        proposedY = defaultOrigin.y
+                    } else if lockedAxis == .horizontal {
+                        proposedY = initialWindowOrigin.y
+                    }
+                } else {
+                    lockedAxis = nil
+                }
+
+                // Magnetic attraction toward the default position (X axis, Y axis, or exact default origin)
+                let nearDefaultX = abs(proposedX - defaultOrigin.x) < magnetThreshold
+                let nearDefaultY = abs(proposedY - defaultOrigin.y) < magnetThreshold
+
+                if nearDefaultX {
+                    proposedX = defaultOrigin.x
+                }
+                if nearDefaultY {
+                    proposedY = defaultOrigin.y
+                }
+
+                if (nearDefaultX || nearDefaultY) && !didSnapFeedback {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+                    didSnapFeedback = true
+                } else if !nearDefaultX && !nearDefaultY {
+                    didSnapFeedback = false
+                }
+
+                let newOrigin = NSPoint(x: round(proposedX), y: round(proposedY))
+                window.setFrameOrigin(newOrigin)
+                PanelController.shared.updateAnchoredBottomOrigin(newOrigin)
+            }
         }
     }
 }
@@ -131,9 +203,9 @@ public final class PanelController: NSObject, NSWindowDelegate {
         }
 
         let hostingView = NSHostingView(rootView: rootView)
-        // Prevent NSHostingView from expanding the window downward on its own!
-        // PanelController exclusively controls window frame so `origin.y` (the bottom edge) is 100% locked.
         hostingView.sizingOptions = []
+        hostingView.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.collapsedHeight)
+        hostingView.autoresizingMask = [.width, .height]
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
         self.panel = panel
@@ -170,6 +242,10 @@ public final class PanelController: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
     }
 
+    public func updateAnchoredBottomOrigin(_ origin: NSPoint) {
+        anchoredBottomOrigin = origin
+    }
+
     /// Strictly resizes the panel from bottom-to-top by keeping `frame.origin.y` locked at `anchoredBottomOrigin.y`.
     public func syncPanelHeight(hasMessages: Bool) {
         let targetHeight = hasMessages ? Self.maxExpandedHeight : Self.collapsedHeight
@@ -194,14 +270,13 @@ public final class PanelController: NSObject, NSWindowDelegate {
             height: height
         )
 
-        if panel.frame != newFrame {
-            isUpdatingFrame = true
-            panel.setFrame(newFrame, display: true, animate: animate)
-            isUpdatingFrame = false
-        }
+        isUpdatingFrame = true
+        panel.setFrame(newFrame, display: true, animate: animate)
+        panel.contentView?.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: height)
+        isUpdatingFrame = false
     }
 
-    private func computeDefaultBottomAnchor() -> NSPoint {
+    public func computeDefaultBottomAnchor() -> NSPoint {
         let mouseLocation = NSEvent.mouseLocation
         let activeScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
             ?? NSScreen.main
@@ -220,7 +295,6 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
     public func windowDidMove(_ notification: Notification) {
         guard !isUpdatingFrame, let panel = panel, panel.isVisible else { return }
-        // If the user drags the window via the bottom bar, update the locked bottom-left anchor to the new spot
         anchoredBottomOrigin = panel.frame.origin
     }
 
