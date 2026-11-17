@@ -4,10 +4,60 @@ import SwiftUI
 @main
 public struct SparkBarMain {
     public static func main() {
+        let args = CommandLine.arguments
+        if let cliIdx = args.firstIndex(of: "--cli") {
+            let subArgs = Array(args.dropFirst(cliIdx + 1))
+            runCLIMode(arguments: subArgs)
+            return
+        }
+
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
         app.run()
+    }
+
+    @MainActor
+    private static func runCLIMode(arguments: [String]) {
+        guard let subcommand = arguments.first else {
+            print("Usage: sparkbar-tools <html2pdf|pdf-info|file-verify> [args...]")
+            exit(1)
+        }
+
+        switch subcommand {
+        case "pdf-info", "file-verify":
+            guard arguments.count >= 2 else {
+                print("Usage: sparkbar-tools \(subcommand) <path>")
+                exit(1)
+            }
+            let (out, isErr) = NativePDFRenderer.inspectPDF(at: arguments[1])
+            print(out)
+            exit(isErr ? 1 : 0)
+
+        case "html2pdf":
+            guard arguments.count >= 3 else {
+                print("Usage: sparkbar-tools html2pdf <input.html> <output.pdf>")
+                exit(1)
+            }
+            let inPath = arguments[1]
+            let outPath = arguments[2]
+            let app = NSApplication.shared
+            app.setActivationPolicy(.prohibited)
+            Task { @MainActor in
+                let (out, isErr) = await NativePDFRenderer.renderToPDF(
+                    htmlOrMarkdown: nil,
+                    inputPath: inPath,
+                    outputPath: outPath
+                )
+                print(out)
+                exit(isErr ? 1 : 0)
+            }
+            app.run()
+
+        default:
+            print("Unknown subcommand: \(subcommand)")
+            exit(1)
+        }
     }
 }
 
@@ -25,6 +75,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+
+        // Warm up the login-shell PATH and Environment Manifest asynchronously
+        EnvironmentProbe.shared.refreshAsync()
 
         // Run as a lightweight accessory / menu bar agent without cluttering the Dock
         NSApp.setActivationPolicy(.accessory)

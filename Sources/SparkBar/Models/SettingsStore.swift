@@ -281,7 +281,7 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Reads universal `AGENTS.md` to include agent instructions in the system prompt.
+    /// Reads universal `AGENTS.md` and appends the pre-probed Host Environment Manifest so the agent never wastes turns guessing PATH, brew, or PDF capabilities.
     public func effectiveSystemPrompt() -> String {
         var prompt = systemPrompt
         let candidatePaths = [
@@ -294,6 +294,11 @@ public final class SettingsStore: ObservableObject {
                 break
             }
         }
+        let manifestSummary = EnvironmentProbe.shared.currentManifest().toSystemPromptSummary(
+            sessionWorkspace: JobManager.shared.workspaceDirectory,
+            currentCwd: JobManager.shared.currentWorkingDirectory
+        )
+        prompt += "\n\n---\n" + manifestSummary
         return prompt
     }
 

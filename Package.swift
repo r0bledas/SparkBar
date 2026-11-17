@@ -20,7 +20,8 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("Security"),
-                .linkedFramework("WebKit")
+                .linkedFramework("WebKit"),
+                .linkedFramework("PDFKit")
             ]
         ),
         .testTarget(

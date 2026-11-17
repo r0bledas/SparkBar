@@ -202,6 +202,45 @@ final class SparkBarTests: XCTestCase {
     }
 
     @MainActor
+    func testEnvironmentManifestAndPersistentShellAndPDF() async {
+        // 1. Verify Environment Manifest captures login PATH & Homebrew
+        let manifest = EnvironmentProbe.shared.currentManifest()
+        XCTAssertTrue(manifest.capturedPath.contains("/opt/homebrew/bin") || manifest.capturedPath.contains("/usr/local/bin"))
+        let promptSummary = manifest.toSystemPromptSummary(
+            sessionWorkspace: JobManager.shared.workspaceDirectory,
+            currentCwd: JobManager.shared.currentWorkingDirectory
+        )
+        XCTAssertTrue(promptSummary.contains("Host Environment Manifest"))
+
+        // 2. Verify persistent working directory across run_command calls
+        let ws = JobManager.shared.workspaceDirectory
+        _ = await ToolExecutor.execute(ToolCallRequest(
+            id: "call_cd",
+            name: "run_command",
+            arguments: #"{"command":"cd '\#(ws)'"}"#
+        ))
+        let pwdRec = await ToolExecutor.execute(ToolCallRequest(
+            id: "call_pwd",
+            name: "run_command",
+            arguments: #"{"command":"pwd"}"#
+        ))
+        XCTAssertFalse(pwdRec.isError)
+        XCTAssertEqual(pwdRec.output.trimmingCharacters(in: .whitespacesAndNewlines), ws)
+
+        // 3. Verify 1-call render_pdf + PDFKit verification
+        let pdfOut = (ws as NSString).appendingPathComponent("test_render.pdf")
+        let pdfRec = await ToolExecutor.execute(ToolCallRequest(
+            id: "call_pdf",
+            name: "render_pdf",
+            arguments: #"{"output_path":"\#(pdfOut)","html":"<h1>SparkBar PDF Test</h1><p>Generated in 1 call via WebKit + PDFKit.</p>"}"#
+        ))
+        XCTAssertFalse(pdfRec.isError, "PDF render failed: \(pdfRec.output)")
+        XCTAssertTrue(pdfRec.output.contains("valid_pdf: true"))
+        XCTAssertTrue(pdfRec.output.contains("page_count: 1"))
+        try? FileManager.default.removeItem(atPath: pdfOut)
+    }
+
+    @MainActor
     func testLiveDeepSeekDynamicModelDiscoveryAndStreaming() async throws {
         _ = SettingsStore.shared // triggers bootstrap
         let key = KeychainHelper.loadKey(for: LLMProviderType.deepseek.rawValue)

@@ -54,26 +54,109 @@ public enum ToolRegistry {
                 "type": "function",
                 "function": [
                     "name": "run_command",
-                    "description": "Execute a non-interactive zsh shell command on the user's Mac and return stdout/stderr. Useful for checking git status, system info, calculations, or developer tasks.",
+                    "description": "Execute a zsh command in the user's login shell environment (full Homebrew PATH, persistent working directory across calls, 30s default synchronous window with automatic promotion to a background job if it runs longer).",
                     "parameters": [
                         "type": "object",
                         "properties": [
                             "command": [
                                 "type": "string",
-                                "description": "The shell command to run"
+                                "description": "The zsh shell command to run"
                             ],
                             "working_directory": [
                                 "type": "string",
-                                "description": "Optional directory path to execute in"
+                                "description": "Optional directory path to execute in (defaults to persistent session cwd)"
+                            ],
+                            "background": [
+                                "type": "boolean",
+                                "description": "Set true to immediately start as a background job and return a job_id"
                             ]
                         ],
                         "required": ["command"]
                     ]
                 ]
             ])
+
+            tools.append([
+                "type": "function",
+                "function": [
+                    "name": "job_status",
+                    "description": "Check the status, PID, elapsed time, and recent output of a background job started by run_command.",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "job_id": [
+                                "type": "string",
+                                "description": "The job_id returned by run_command"
+                            ]
+                        ],
+                        "required": ["job_id"]
+                    ]
+                ]
+            ])
+
+            tools.append([
+                "type": "function",
+                "function": [
+                    "name": "job_cancel",
+                    "description": "Terminate a running background job by job_id.",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "job_id": [
+                                "type": "string",
+                                "description": "The job_id to terminate"
+                            ]
+                        ],
+                        "required": ["job_id"]
+                    ]
+                ]
+            ])
         }
 
         if settings.enableFileTools {
+            tools.append([
+                "type": "function",
+                "function": [
+                    "name": "render_pdf",
+                    "description": "First-class HTML or Markdown to PDF generator using native macOS WebKit createPDF + PDFKit verification in 1 call. Automatically verifies page_count and byte size.",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "output_path": [
+                                "type": "string",
+                                "description": "Destination file path for the generated .pdf"
+                            ],
+                            "html": [
+                                "type": "string",
+                                "description": "HTML (or plain content) to render into the PDF"
+                            ],
+                            "input_path": [
+                                "type": "string",
+                                "description": "Optional path to an existing .html file to render instead of inline html"
+                            ]
+                        ],
+                        "required": ["output_path"]
+                    ]
+                ]
+            ])
+
+            tools.append([
+                "type": "function",
+                "function": [
+                    "name": "pdf_info",
+                    "description": "Verify a PDF file using native macOS PDFKit (returns exact page_count, page dimensions, byte size, and text preview — reliable even on unindexed files where mdls returns null).",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "path": [
+                                "type": "string",
+                                "description": "Path to the PDF file"
+                            ]
+                        ],
+                        "required": ["path"]
+                    ]
+                ]
+            ])
             tools.append([
                 "type": "function",
                 "function": [
@@ -182,7 +265,22 @@ public enum ToolExecutor {
         case "run_command":
             let command = args["command"] as? String ?? ""
             let cwd = args["working_directory"] as? String
-            result = await performRunCommand(command: command, workingDirectory: cwd)
+            let background = args["background"] as? Bool ?? false
+            result = await JobManager.shared.runCommand(command, workingDirectory: cwd, background: background, timeoutSeconds: 30.0)
+        case "job_status":
+            let jobId = args["job_id"] as? String ?? ""
+            result = JobManager.shared.formatJobStatus(jobId: jobId)
+        case "job_cancel":
+            let jobId = args["job_id"] as? String ?? ""
+            result = JobManager.shared.cancelJob(jobId: jobId)
+        case "render_pdf":
+            let outPath = args["output_path"] as? String ?? ""
+            let html = args["html"] as? String
+            let inPath = args["input_path"] as? String
+            result = await NativePDFRenderer.renderToPDF(htmlOrMarkdown: html, inputPath: inPath, outputPath: outPath)
+        case "pdf_info":
+            let path = args["path"] as? String ?? ""
+            result = await MainActor.run { NativePDFRenderer.inspectPDF(at: path) }
         case "read_file":
             let path = args["path"] as? String ?? ""
             let maxLines = args["max_lines"] as? Int ?? 200
@@ -224,7 +322,7 @@ public enum ToolExecutor {
     }
 
     private static func expandPath(_ path: String) -> String {
-        NSString(string: path).expandingTildeInPath
+        JobManager.shared.resolvePath(path)
     }
 
     // MARK: - Web Search (Native WKWebView Search + Wikipedia / HN API Fallbacks)
