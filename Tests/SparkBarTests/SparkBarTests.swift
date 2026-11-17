@@ -94,6 +94,41 @@ final class SparkBarTests: XCTestCase {
         }
     }
 
+    func testMarkdownAndASCIITableParsing() {
+        let md = """
+        Here is a Markdown table:
+
+        | Model | Speed |
+        | --- | --- |
+        | DeepSeek-V4.1-Flash | Fast |
+        | DeepSeek-V4-Pro | Deep |
+
+        And an ASCII box table:
+
+        +-------+-------+
+        | Col A | Col B |
+        +-------+-------+
+        | 100   | 200   |
+        +-------+-------+
+        """
+
+        let blocks = MarkdownMessageView.parseBlocks(from: md)
+        let hasTable = blocks.contains { block in
+            if case .table(_, let headers, let rows, _) = block {
+                return headers == ["Model", "Speed"] && rows.count == 2
+            }
+            return false
+        }
+        let hasASCII = blocks.contains { block in
+            if case .asciiArt(_, let content) = block {
+                return content.contains("+-------+-------+")
+            }
+            return false
+        }
+        XCTAssertTrue(hasTable, "Expected Markdown pipe table to be parsed")
+        XCTAssertTrue(hasASCII, "Expected ASCII box table to be parsed")
+    }
+
     func testToolExecutorRunCommandAndFileIO() async {
         let tempPath = "/tmp/sparkbar_unit_test_\(UUID().uuidString).txt"
         let writeCall = ToolCallRequest(

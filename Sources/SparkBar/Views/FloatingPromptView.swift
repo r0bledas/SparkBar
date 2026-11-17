@@ -39,11 +39,7 @@ public struct FloatingPromptView: View {
                 .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
         )
         .padding(8)
-        .frame(width: 680)
-        .frame(
-            minHeight: visibleMessages.isEmpty && viewModel.errorMessage == nil ? 114 : 440,
-            maxHeight: 540
-        )
+        .frame(minWidth: 380, maxWidth: .infinity, minHeight: 110, maxHeight: .infinity)
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }
@@ -52,6 +48,12 @@ public struct FloatingPromptView: View {
         }
         .onReceive(PanelController.shared.focusTrigger) { _ in
             isInputFocused = true
+        }
+        .onChange(of: visibleMessages.isEmpty) { _, isEmpty in
+            PanelController.shared.updateHeightForConversationIfNeeded(hasMessages: !isEmpty || viewModel.errorMessage != nil)
+        }
+        .onChange(of: viewModel.errorMessage != nil) { _, hasError in
+            PanelController.shared.updateHeightForConversationIfNeeded(hasMessages: !visibleMessages.isEmpty || hasError)
         }
     }
 
@@ -505,20 +507,24 @@ public struct FloatingPromptView: View {
                 .frame(height: 13)
                 .opacity(0.6)
 
-            // Tools & Web grouped together without a separator between them (No icons)
+            // Tools & Web grouped together without a separator between them (With hammer & globe icons restored)
             HStack(spacing: 6) {
                 Button {
                     settings.enableTools.toggle()
                 } label: {
-                    Text("Tools")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
-                        .background(
-                            (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
-                            in: Capsule()
-                        )
+                    HStack(spacing: 4) {
+                        Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
+                            .font(.system(size: 10.5))
+                        Text("Tools")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
+                        in: Capsule()
+                    )
                 }
                 .buttonStyle(.plain)
                 .help("Toggle autonomous tools (Web Search, Terminal, File I/O)")
@@ -526,21 +532,27 @@ public struct FloatingPromptView: View {
                 Button {
                     settings.enableWebSearchTool.toggle()
                 } label: {
-                    Text("Web")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
-                        .background(
-                            (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
-                            in: Capsule()
-                        )
+                    HStack(spacing: 4) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 10.5))
+                        Text("Web")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
+                        in: Capsule()
+                    )
                 }
                 .buttonStyle(.plain)
                 .help("Toggle live web search")
             }
 
-            Spacer()
+            // Empty space in the bottom bar acts as a drag handle to move the window
+            WindowDragHandle()
+                .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 28)
 
             if !viewModel.messages.isEmpty {
                 Button {

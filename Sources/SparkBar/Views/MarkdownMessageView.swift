@@ -36,11 +36,15 @@ public struct VisualEffectBlur: NSViewRepresentable {
 public enum MarkdownBlock: Identifiable, Equatable {
     case text(id: Int, content: String)
     case code(id: Int, language: String, code: String)
+    case table(id: Int, headers: [String], rows: [[String]], rawText: String)
+    case asciiArt(id: Int, content: String)
 
     public var id: Int {
         switch self {
         case .text(let id, _): return id
         case .code(let id, _, _): return id
+        case .table(let id, _, _, _): return id
+        case .asciiArt(let id, _): return id
         }
     }
 }
@@ -65,6 +69,25 @@ public struct MarkdownMessageView: View {
                             renderedParagraph(trimmed)
                         }
                     }
+
+                case .table(_, let headers, let rows, _):
+                    renderedMarkdownTable(headers: headers, rows: rows)
+
+                case .asciiArt(_, let artContent):
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        Text(artContent)
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.primary.opacity(0.95))
+                            .fixedSize(horizontal: true, vertical: true)
+                            .textSelection(.enabled)
+                            .padding(10)
+                    }
+                    .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+                    )
+
                 case .code(let id, let lang, let codeContent):
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
@@ -104,6 +127,7 @@ public struct MarkdownMessageView: View {
                             Text(codeContent)
                                 .font(.system(size: 12.5, weight: .regular, design: .monospaced))
                                 .foregroundStyle(.primary.opacity(0.95))
+                                .fixedSize(horizontal: true, vertical: true)
                                 .textSelection(.enabled)
                                 .padding(12)
                         }
@@ -115,6 +139,72 @@ public struct MarkdownMessageView: View {
                     )
                 }
             }
+        }
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func renderedMarkdownTable(headers: [String], rows: [[String]]) -> some View {
+        let colCount = max(headers.count, rows.map(\.count).max() ?? 0)
+        if colCount > 0 {
+            ScrollView(.horizontal, showsIndicators: true) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    if !headers.isEmpty {
+                        GridRow {
+                            ForEach(0..<colCount, id: \.self) { colIdx in
+                                let cellText = colIdx < headers.count ? headers[colIdx] : ""
+                                inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .semibold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.primary.opacity(0.08))
+                            }
+                        }
+                        Divider()
+                    }
+
+                    ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                        GridRow {
+                            ForEach(0..<colCount, id: \.self) { colIdx in
+                                let cellText = colIdx < row.count ? row[colIdx] : ""
+                                inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .regular))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(rowIdx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.03))
+                            }
+                        }
+                        if rowIdx < rows.count - 1 {
+                            Divider()
+                                .opacity(0.4)
+                        }
+                    }
+                }
+                .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                )
+            }
+            .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private func inlineMarkdownText(_ raw: String, font: Font) -> some View {
+        if let attributed = try? AttributedString(
+            markdown: raw,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            Text(attributed)
+                .font(font)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        } else {
+            Text(raw)
+                .font(font)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
         }
     }
 
@@ -138,6 +228,8 @@ public struct MarkdownMessageView: View {
         }
     }
 
+    // MARK: - Block Parser (Code blocks, Markdown pipe tables, ASCII box tables, and prose)
+
     public static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         let lines = markdown.components(separatedBy: "\n")
@@ -147,8 +239,8 @@ public struct MarkdownMessageView: View {
         var blockIndex = 0
 
         for line in lines {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                let fence = line.trimmingCharacters(in: .whitespaces)
+            let trimmedFence = line.trimmingCharacters(in: .whitespaces)
+            if trimmedFence.hasPrefix("```") {
                 if inCodeBlock {
                     blocks.append(.code(id: blockIndex, language: currentLang, code: currentLines.joined(separator: "\n")))
                     blockIndex += 1
@@ -157,11 +249,10 @@ public struct MarkdownMessageView: View {
                     inCodeBlock = false
                 } else {
                     if !currentLines.isEmpty {
-                        blocks.append(.text(id: blockIndex, content: currentLines.joined(separator: "\n")))
-                        blockIndex += 1
+                        appendNonCodeBlocks(from: currentLines, into: &blocks, nextId: &blockIndex)
                         currentLines.removeAll()
                     }
-                    currentLang = String(fence.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                    currentLang = String(trimmedFence.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                     inCodeBlock = true
                 }
             } else {
@@ -173,10 +264,111 @@ public struct MarkdownMessageView: View {
             if inCodeBlock {
                 blocks.append(.code(id: blockIndex, language: currentLang, code: currentLines.joined(separator: "\n")))
             } else {
-                blocks.append(.text(id: blockIndex, content: currentLines.joined(separator: "\n")))
+                appendNonCodeBlocks(from: currentLines, into: &blocks, nextId: &blockIndex)
             }
         }
 
         return blocks
+    }
+
+    private static func appendNonCodeBlocks(from lines: [String], into blocks: inout [MarkdownBlock], nextId: inout Int) {
+        var idx = 0
+        var normalBuffer: [String] = []
+
+        func flushNormalBuffer() {
+            guard !normalBuffer.isEmpty else { return }
+            let joined = normalBuffer.joined(separator: "\n")
+            if !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                blocks.append(.text(id: nextId, content: joined))
+                nextId += 1
+            }
+            normalBuffer.removeAll()
+        }
+
+        while idx < lines.count {
+            let line = lines[idx]
+
+            // 1. Check for ASCII box-drawing or `+---+---+` table blocks
+            if isASCIIBoxTableLine(line) {
+                var asciiLines: [String] = [line]
+                var j = idx + 1
+                while j < lines.count && (isASCIIBoxTableLine(lines[j]) || isPipeRowLine(lines[j])) {
+                    asciiLines.append(lines[j])
+                    j += 1
+                }
+                if asciiLines.count >= 2 {
+                    flushNormalBuffer()
+                    blocks.append(.asciiArt(id: nextId, content: asciiLines.joined(separator: "\n")))
+                    nextId += 1
+                    idx = j
+                    continue
+                }
+            }
+
+            // 2. Check for Markdown Pipe Table (`| Header | ... |` followed by `| --- | --- |`)
+            if idx + 1 < lines.count,
+               isPipeRowLine(line),
+               isMarkdownTableSeparatorLine(lines[idx + 1]) {
+                var tableLines: [String] = [line, lines[idx + 1]]
+                var j = idx + 2
+                while j < lines.count && isPipeRowLine(lines[j]) {
+                    tableLines.append(lines[j])
+                    j += 1
+                }
+                flushNormalBuffer()
+                let headers = splitPipeCells(tableLines[0])
+                var rows: [[String]] = []
+                for rowLine in tableLines.dropFirst(2) {
+                    if !isMarkdownTableSeparatorLine(rowLine) {
+                        rows.append(splitPipeCells(rowLine))
+                    }
+                }
+                blocks.append(.table(id: nextId, headers: headers, rows: rows, rawText: tableLines.joined(separator: "\n")))
+                nextId += 1
+                idx = j
+                continue
+            }
+
+            normalBuffer.append(line)
+            idx += 1
+        }
+
+        flushNormalBuffer()
+    }
+
+    private static func isASCIIBoxTableLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        // Box drawing characters: ┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘ │ ─ ╔ ╦ ╗ ╠ ╬ ╣ ╚ ╩ ╝ ║ ═
+        let boxChars = CharacterSet(charactersIn: "┌┬┐├┼┤└┴┘│─╔╦╗╠╬╣╚╩╝║═")
+        if trimmed.unicodeScalars.contains(where: { boxChars.contains($0) }) {
+            return true
+        }
+        // Classic ASCII `+---+---+` border line
+        if trimmed.hasPrefix("+") && trimmed.hasSuffix("+") && trimmed.contains("-") {
+            return true
+        }
+        return false
+    }
+
+    private static func isPipeRowLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") else { return false }
+        let pipeCount = trimmed.filter { $0 == "|" }.count
+        return pipeCount >= 2 || (trimmed.hasPrefix("|") && trimmed.hasSuffix("|"))
+    }
+
+    private static func isMarkdownTableSeparatorLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") && trimmed.contains("-") else { return false }
+        let allowed = CharacterSet(charactersIn: "|-: \t")
+        return trimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    private static func splitPipeCells(_ line: String) -> [String] {
+        var working = line.trimmingCharacters(in: .whitespaces)
+        if working.hasPrefix("|") { working.removeFirst() }
+        if working.hasSuffix("|") { working.removeLast() }
+        return working.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
     }
 }

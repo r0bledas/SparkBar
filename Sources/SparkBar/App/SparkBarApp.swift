@@ -19,6 +19,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Run as a lightweight accessory / menu bar agent without cluttering the Dock
         NSApp.setActivationPolicy(.accessory)
 
+        setupMainMenuWithEditCommands()
         setupStatusBarItem()
         PanelController.shared.setupPanel(with: FloatingPromptView())
 
@@ -29,6 +30,36 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Show the floating bar immediately on launch so the user sees it right away
         PanelController.shared.showPanel()
+    }
+
+    private func setupMainMenuWithEditCommands() {
+        let mainMenu = NSMenu()
+
+        // Application Menu
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenuItem.submenu = appMenu
+        appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAndResetAction), keyEquivalent: "w")
+        appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Quit SparkBar", action: #selector(quitAppAction), keyEquivalent: "q")
+
+        // Standard Edit Menu (Required by macOS Responder Chain for ⌘C Copy, ⌘V Paste, ⌘X Cut, ⌘A Select All)
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        NSApp.mainMenu = mainMenu
     }
 
     private func setupStatusBarItem() {
@@ -50,8 +81,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(toggleItem)
 
         let closeItem = NSMenuItem(
-            title: "Close Panel",
-            action: #selector(closePanelAction),
+            title: "Close & Reset Panel",
+            action: #selector(closePanelAndResetAction),
             keyEquivalent: "w"
         )
         closeItem.keyEquivalentModifierMask = [.command]
@@ -97,8 +128,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         PanelController.shared.togglePanel()
     }
 
-    @objc private func closePanelAction() {
-        PanelController.shared.hidePanel()
+    @objc private func closePanelAndResetAction() {
+        PanelController.shared.closeAndResetPanel()
     }
 
     @objc private func clearConversationAction() {
