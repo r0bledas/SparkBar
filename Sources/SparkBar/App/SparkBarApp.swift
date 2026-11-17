@@ -19,6 +19,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Run as a lightweight accessory / menu bar agent without cluttering the Dock
         NSApp.setActivationPolicy(.accessory)
 
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let iconImage = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = iconImage
+        }
+
         setupMainMenuWithEditCommands()
         setupStatusBarItem()
         PanelController.shared.setupPanel(with: FloatingPromptView())

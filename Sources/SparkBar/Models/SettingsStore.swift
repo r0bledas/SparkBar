@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 @MainActor
 public final class SettingsStore: ObservableObject {
@@ -95,6 +96,13 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var openOnStartup: Bool {
+        didSet {
+            UserDefaults.standard.set(openOnStartup, forKey: "sparkbar.openOnStartup")
+            updateLaunchAtLogin(enabled: openOnStartup)
+        }
+    }
+
     @Published public var temperature: Double {
         didSet {
             UserDefaults.standard.set(temperature, forKey: "sparkbar.temperature")
@@ -134,6 +142,7 @@ public final class SettingsStore: ObservableObject {
         self.enableClipboardTool = defaults.object(forKey: "sparkbar.enableClipboardTool") as? Bool ?? true
         self.enableServerSideSearch = defaults.object(forKey: "sparkbar.enableServerSideSearch") as? Bool ?? true
         self.pinWindowOnBlur = defaults.object(forKey: "sparkbar.pinWindowOnBlur") as? Bool ?? false
+        self.openOnStartup = defaults.object(forKey: "sparkbar.openOnStartup") as? Bool ?? false
         self.temperature = defaults.object(forKey: "sparkbar.temperature") as? Double ?? 0.3
 
         bootstrapLocalKeysIfNeeded()
@@ -278,6 +287,49 @@ public final class SettingsStore: ObservableObject {
             }
         }
         return prompt
+    }
+
+    private func updateLaunchAtLogin(enabled: Bool) {
+        if #available(macOS 13.0, *) {
+            do {
+                if enabled {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                // Fallback to LaunchAgent plist below for unsigned/local builds
+            }
+        }
+
+        let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        let plistURL = launchAgentsDir.appendingPathComponent("com.sparkbar.app.plist")
+
+        if enabled {
+            let executablePath = Bundle.main.executablePath
+                ?? "/Applications/SparkBar.app/Contents/MacOS/SparkBar"
+            let plistContent = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>Label</key>
+                <string>com.sparkbar.app</string>
+                <key>ProgramArguments</key>
+                <array>
+                    <string>\(executablePath)</string>
+                </array>
+                <key>RunAtLoad</key>
+                <true/>
+            </dict>
+            </plist>
+            """
+            try? FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
+            try? plistContent.write(to: plistURL, atomically: true, encoding: .utf8)
+        } else {
+            try? FileManager.default.removeItem(at: plistURL)
+        }
     }
 
     private func bootstrapLocalKeysIfNeeded() {

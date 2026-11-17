@@ -12,8 +12,19 @@ public struct SettingsSheetView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Label("SparkBar Settings", systemImage: "bolt.horizontal.circle.fill")
+            HStack(spacing: 10) {
+                if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+                   let nsImage = NSImage(contentsOf: iconURL) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                } else {
+                    Image(systemName: "bolt.horizontal.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color.accentColor)
+                }
+                Text("SparkBar Settings")
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Button("Done") {
@@ -210,6 +221,9 @@ public struct SettingsSheetView: View {
                         }
 
                         Toggle("Keep window pinned when clicking outside", isOn: $settings.pinWindowOnBlur)
+                            .font(.system(size: 13))
+
+                        Toggle("Open SparkBar automatically on startup", isOn: $settings.openOnStartup)
                             .font(.system(size: 13))
                     }
                 }
