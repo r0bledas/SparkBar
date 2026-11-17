@@ -40,6 +40,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
+        appMenu.addItem(withTitle: "New Chat", action: #selector(clearConversationAction), keyEquivalent: "n")
         appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAction), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())
@@ -89,8 +90,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         closeItem.target = self
         menu.addItem(closeItem)
 
+        let newChatItem = NSMenuItem(
+            title: "New Chat",
+            action: #selector(clearConversationAction),
+            keyEquivalent: "n"
+        )
+        newChatItem.keyEquivalentModifierMask = [.command]
+        newChatItem.target = self
+        menu.addItem(newChatItem)
+
         let clearItem = NSMenuItem(
-            title: "New / Clear Prompt",
+            title: "Clear Prompt",
             action: #selector(clearConversationAction),
             keyEquivalent: "k"
         )

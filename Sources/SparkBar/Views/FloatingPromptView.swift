@@ -39,7 +39,7 @@ public struct FloatingPromptView: View {
                 .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
         )
         .padding(8)
-        .frame(width: 680)
+        .frame(width: 476)
         .frame(
             minHeight: visibleMessages.isEmpty && viewModel.errorMessage == nil ? 114 : 440,
             maxHeight: 540
@@ -270,6 +270,10 @@ public struct FloatingPromptView: View {
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
 
+                    Divider()
+                        .opacity(0.35)
+                        .padding(.vertical, 2)
+
                     HStack(spacing: 12) {
                         Button {
                             NSPasteboard.general.clearContents()
@@ -292,7 +296,6 @@ public struct FloatingPromptView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Copy assistant answer")
                     }
-                    .padding(.top, 2)
                 } else if viewModel.isStreaming && message.id == viewModel.messages.last?.id && viewModel.activeToolStatus == nil {
                     HStack(spacing: 6) {
                         ProgressView()

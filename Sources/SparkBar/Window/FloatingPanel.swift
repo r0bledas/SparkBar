@@ -5,6 +5,7 @@ import Combine
 /// Borderless, static-size, non-activating floating panel that mimics macOS Spotlight & ChatGPT Option+Space bar.
 public final class FloatingPanel: NSPanel {
     public var onEscapePressed: (() -> Void)?
+    public var onNewChatPressed: (() -> Void)?
 
     public init(contentRect: NSRect) {
         super.init(
@@ -47,19 +48,31 @@ public final class FloatingPanel: NSPanel {
             onEscapePressed?()
             return
         }
-        if event.modifierFlags.contains(.command),
-           event.charactersIgnoringModifiers?.lowercased() == "w" {
-            onEscapePressed?()
-            return
+        if event.modifierFlags.contains(.command) {
+            let char = event.charactersIgnoringModifiers?.lowercased()
+            if char == "w" {
+                onEscapePressed?()
+                return
+            }
+            if char == "n" {
+                onNewChatPressed?()
+                return
+            }
         }
         super.keyDown(with: event)
     }
 
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.modifierFlags.contains(.command),
-           event.charactersIgnoringModifiers?.lowercased() == "w" {
-            onEscapePressed?()
-            return true
+        if event.modifierFlags.contains(.command) {
+            let char = event.charactersIgnoringModifiers?.lowercased()
+            if char == "w" {
+                onEscapePressed?()
+                return true
+            }
+            if char == "n" {
+                onNewChatPressed?()
+                return true
+            }
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -96,11 +109,15 @@ public final class PanelController: NSObject, NSWindowDelegate {
     }
 
     public func setupPanel<Content: View>(with rootView: Content) {
-        let initialRect = NSRect(x: 0, y: 0, width: 680, height: 480)
+        let initialRect = NSRect(x: 0, y: 0, width: 476, height: 480)
         let panel = FloatingPanel(contentRect: initialRect)
         panel.delegate = self
         panel.onEscapePressed = { [weak self] in
             self?.hidePanel()
+        }
+        panel.onNewChatPressed = { [weak self] in
+            ChatViewModel.shared.clearConversation()
+            self?.focusTrigger.send()
         }
 
         let hostingView = NSHostingView(rootView: rootView)

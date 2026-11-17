@@ -148,42 +148,62 @@ public struct MarkdownMessageView: View {
         let colCount = max(headers.count, rows.map(\.count).max() ?? 0)
         if colCount > 0 {
             ScrollView(.horizontal, showsIndicators: true) {
-                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header Row
                     if !headers.isEmpty {
-                        GridRow {
+                        HStack(spacing: 0) {
                             ForEach(0..<colCount, id: \.self) { colIdx in
                                 let cellText = colIdx < headers.count ? headers[colIdx] : ""
                                 inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color.primary.opacity(0.08))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(minWidth: 110, maxWidth: .infinity, alignment: .leading)
+
+                                if colIdx < colCount - 1 {
+                                    Rectangle()
+                                        .fill(Color.primary.opacity(0.14))
+                                        .frame(width: 1)
+                                }
                             }
                         }
-                        Divider()
+                        .background(Color.primary.opacity(0.08))
+
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.18))
+                            .frame(height: 1)
                     }
 
+                    // Data Rows with clean horizontal & vertical separators
                     ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
-                        GridRow {
+                        HStack(spacing: 0) {
                             ForEach(0..<colCount, id: \.self) { colIdx in
                                 let cellText = colIdx < row.count ? row[colIdx] : ""
                                 inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .regular))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(rowIdx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.03))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .frame(minWidth: 110, maxWidth: .infinity, alignment: .leading)
+
+                                if colIdx < colCount - 1 {
+                                    Rectangle()
+                                        .fill(Color.primary.opacity(0.10))
+                                        .frame(width: 1)
+                                }
                             }
                         }
+                        .background(rowIdx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.035))
+
                         if rowIdx < rows.count - 1 {
-                            Divider()
-                                .opacity(0.4)
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.12))
+                                .frame(height: 1)
                         }
                     }
                 }
-                .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.black.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
                 )
             }
             .textSelection(.enabled)
