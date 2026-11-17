@@ -331,7 +331,7 @@ public final class LLMStreamingClient {
             "stream": true
         ]
 
-        if let effort = reasoningEffort, !effort.isEmpty {
+        if let effort = reasoningEffort, !effort.isEmpty, effort.lowercased() != "none" {
             body["reasoning_effort"] = effort
         }
 

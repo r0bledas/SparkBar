@@ -13,21 +13,21 @@ public struct FloatingPromptView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Top Spotlight Search / Prompt Input Bar
-            promptInputBar
+            // 1. Top Conversation / Streaming Area (Appears above the prompt input when messages exist)
+            if !visibleMessages.isEmpty || viewModel.errorMessage != nil || viewModel.activeToolStatus != nil {
+                conversationArea
 
-            // Conversation / Streaming Area (Expands smoothly when messages or errors exist)
-            if !viewModel.messages.isEmpty || viewModel.errorMessage != nil {
                 Divider()
                     .opacity(0.45)
-
-                conversationArea
             }
+
+            // 2. Prompt Input Box ("Ask anything or run a task…")
+            promptInputBar
 
             Divider()
                 .opacity(0.45)
 
-            // Bottom Compact Status & Control Bar
+            // 3. Bottom Control Bar (Model | Reasoning Effort | Tools & Web | Clear & Settings)
             bottomControlBar
         }
         .background(
@@ -40,8 +40,10 @@ public struct FloatingPromptView: View {
         )
         .padding(8)
         .frame(width: 680)
-        .frame(minHeight: viewModel.messages.isEmpty && viewModel.errorMessage == nil ? 120 : 440,
-               maxHeight: 540)
+        .frame(
+            minHeight: visibleMessages.isEmpty && viewModel.errorMessage == nil ? 114 : 440,
+            maxHeight: 540
+        )
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }
@@ -53,7 +55,7 @@ public struct FloatingPromptView: View {
         }
     }
 
-    // MARK: - Top Prompt Input Bar
+    // MARK: - Prompt Input Bar (Directly above Bottom Control Bar)
 
     private var promptInputBar: some View {
         HStack(spacing: 12) {
@@ -65,7 +67,7 @@ public struct FloatingPromptView: View {
 
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 17, weight: .regular))
+                .font(.system(size: 16.5, weight: .regular))
                 .focused($isInputFocused)
                 .onSubmit {
                     viewModel.sendCurrentPrompt()
@@ -114,15 +116,15 @@ public struct FloatingPromptView: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 15)
+        .padding(.vertical, 14)
     }
 
-    // MARK: - Conversation Stream Area
+    // MARK: - Chronological Conversation & Tool Stream Area
 
     private var conversationArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(visibleMessages) { msg in
                         messageRow(for: msg)
                             .id(msg.id)
@@ -171,7 +173,7 @@ public struct FloatingPromptView: View {
                     proxy.scrollTo(lastId, anchor: .bottom)
                 }
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
+            .onChange(of: visibleMessages.count) { _, _ in
                 if let lastId = visibleMessages.last?.id {
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(lastId, anchor: .bottom)
@@ -181,13 +183,33 @@ public struct FloatingPromptView: View {
         }
     }
 
+    /// Chronological items to display in the stream:
+    /// - User messages
+    /// - Separate Tool execution messages (in exact chronological order, outside assistant text bubbles)
+    /// - Assistant messages that actually have content, reasoning, or are currently the active streaming placeholder
     private var visibleMessages: [ChatMessage] {
-        viewModel.messages.filter { $0.role == .user || $0.role == .assistant }
+        let all = viewModel.messages
+        return all.enumerated().compactMap { index, msg in
+            switch msg.role {
+            case .user:
+                return msg
+            case .tool:
+                return msg
+            case .assistant:
+                let hasText = !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let hasReasoning = !(msg.reasoningContent ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let isLastStreaming = viewModel.isStreaming && index == all.count - 1 && viewModel.activeToolStatus == nil
+                return (hasText || hasReasoning || isLastStreaming) ? msg : nil
+            case .system:
+                return nil
+            }
+        }
     }
 
     @ViewBuilder
     private func messageRow(for message: ChatMessage) -> some View {
-        if message.role == .user {
+        switch message.role {
+        case .user:
             HStack {
                 Spacer(minLength: 60)
                 Text(message.content)
@@ -198,9 +220,28 @@ public struct FloatingPromptView: View {
                     .background(Color.accentColor.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .textSelection(.enabled)
             }
-        } else {
+
+        case .tool:
+            // Standalone chronological tool call block (completely separate from the assistant text bubble)
+            if let record = message.toolRecords.first {
+                toolRecordBadge(record)
+            } else {
+                toolRecordBadge(
+                    ToolExecutionRecord(
+                        id: message.id,
+                        toolCallId: message.toolCallId ?? "",
+                        toolName: message.toolName ?? "tool",
+                        arguments: "",
+                        output: message.content,
+                        durationMs: 0,
+                        isError: false
+                    )
+                )
+            }
+
+        case .assistant:
             VStack(alignment: .leading, spacing: 8) {
-                // Reasoning chain (e.g. DeepSeek-R1)
+                // Reasoning chain (if present)
                 if let reasoning = message.reasoningContent, !reasoning.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Button {
@@ -227,15 +268,6 @@ public struct FloatingPromptView: View {
                                 .padding(10)
                                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                                 .textSelection(.enabled)
-                        }
-                    }
-                }
-
-                // Executed Tool Call Badges (Hermes / OpenCode agent visibility)
-                if !message.toolRecords.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(message.toolRecords) { record in
-                            toolRecordBadge(record)
                         }
                     }
                 }
@@ -267,7 +299,7 @@ public struct FloatingPromptView: View {
                         .accessibilityLabel("Copy assistant answer")
                     }
                     .padding(.top, 2)
-                } else if viewModel.isStreaming && message.toolRecords.isEmpty {
+                } else if viewModel.isStreaming {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.small)
@@ -280,6 +312,9 @@ public struct FloatingPromptView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+        case .system:
+            EmptyView()
         }
     }
 
@@ -295,7 +330,7 @@ public struct FloatingPromptView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: record.isError ? "xmark.octagon.fill" : "wrench.and.screwdriver.fill")
+                    Image(systemName: record.isError ? "xmark.octagon.fill" : "terminal.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(record.isError ? Color.orange : Color.accentColor)
                     Text(record.toolName)
@@ -313,9 +348,13 @@ public struct FloatingPromptView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
             }
             .buttonStyle(.plain)
 
@@ -329,7 +368,7 @@ public struct FloatingPromptView: View {
                         .padding(8)
                 }
                 .frame(maxHeight: 140)
-                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 7))
+                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -367,7 +406,7 @@ public struct FloatingPromptView: View {
                 .help("Select AI Provider")
             }
 
-            // Dynamic Model Dropdown (Fetched directly from the API /models endpoint — zero hardcoding)
+            // Dynamic Model Dropdown (Shows clean API name e.g. DeepSeek-V4.1-Flash, DeepSeek-V4-Pro)
             Menu {
                 if settings.availableModels.isEmpty {
                     Button("Refresh Models from API…") {
@@ -403,7 +442,7 @@ public struct FloatingPromptView: View {
                             .frame(width: 7, height: 7)
                     }
                     Text(currentModelBarLabel)
-                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11.5, weight: .medium))
                         .lineLimit(1)
                 }
             }
@@ -411,13 +450,16 @@ public struct FloatingPromptView: View {
             .fixedSize()
             .help("Select Model (dynamically loaded from API)")
 
-            // Reasoning Effort Dropdown (low / high / max)
-            let effortLevels = settings.supportedEffortLevelsForCurrentModel.isEmpty
-                ? ["low", "high", "max"]
-                : settings.supportedEffortLevelsForCurrentModel
+            // Visual Separator between Model and Thinking Effort
+            Divider()
+                .frame(height: 13)
+                .opacity(0.6)
+
+            // Reasoning Effort Dropdown (None / Low / High / Max — No icon)
+            let effortLevels = settings.supportedEffortLevelsForCurrentModel
 
             Menu {
-                Section("Reasoning Effort") {
+                Section("Thinking Effort") {
                     ForEach(effortLevels, id: \.self) { level in
                         Button {
                             settings.reasoningEffort = level
@@ -432,62 +474,61 @@ public struct FloatingPromptView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 10.5))
-                    Text(settings.reasoningEffort.capitalized)
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(Color.purple)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Color.purple.opacity(0.14), in: Capsule())
+                Text(settings.reasoningEffort.capitalized)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Select Reasoning Effort")
+            .help("Select Thinking Effort")
 
-            // Tools Quick Toggle
-            Button {
-                settings.enableTools.toggle()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
-                        .font(.system(size: 10.5))
-                    Text("Tools")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(
-                    (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
-                    in: Capsule()
-                )
-            }
-            .buttonStyle(.plain)
-            .help("Toggle autonomous tools (Web Search, Terminal, File I/O)")
+            // Visual Separator before the Tools & Web group
+            Divider()
+                .frame(height: 13)
+                .opacity(0.6)
 
-            // Web Search Quick Toggle
-            Button {
-                settings.enableWebSearchTool.toggle()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "globe")
-                        .font(.system(size: 10.5))
-                    Text("Web")
-                        .font(.system(size: 11, weight: .medium))
+            // Tools & Web grouped together without a separator between them
+            HStack(spacing: 6) {
+                Button {
+                    settings.enableTools.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
+                            .font(.system(size: 10.5))
+                        Text("Tools")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
+                        in: Capsule()
+                    )
                 }
-                .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(
-                    (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
-                    in: Capsule()
-                )
+                .buttonStyle(.plain)
+                .help("Toggle autonomous tools (Web Search, Terminal, File I/O)")
+
+                Button {
+                    settings.enableWebSearchTool.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 10.5))
+                        Text("Web")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
+                        in: Capsule()
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Toggle live web search")
             }
-            .buttonStyle(.plain)
-            .help("Toggle live web search")
 
             Spacer()
 

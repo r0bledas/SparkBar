@@ -104,13 +104,13 @@ public final class ChatViewModel: ObservableObject {
                         if Task.isCancelled { break }
                         activeToolStatus = "Running \(call.name)..."
                         let record = await ToolExecutor.execute(call)
-                        messages[assistantIndex].toolRecords.append(record)
 
                         let toolResultMsg = ChatMessage(
                             role: .tool,
                             content: record.output,
                             toolCallId: call.id,
-                            toolName: call.name
+                            toolName: call.name,
+                            toolRecords: [record]
                         )
                         messages.append(toolResultMsg)
                     }

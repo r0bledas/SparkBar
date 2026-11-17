@@ -83,19 +83,16 @@ public struct RemoteModelInfo: Identifiable, Codable, Equatable {
         self.defaultEffortLevel = defaultEffortLevel
     }
 
-    /// Shows the actual API name alongside the API ID if both are provided by the server (e.g. `DeepSeek-V4.1-Flash (deepseek-flash)`).
+    /// Shows the clean API model name (e.g. `DeepSeek-V4.1-Flash` or `DeepSeek-V4-Pro`) without repeating the ID in parentheses.
     public var displayLabel: String {
-        if let name = name, !name.isEmpty, name != id {
-            return "\(name) (\(id))"
+        if let name = name, !name.isEmpty {
+            return name
         }
         return id
     }
 
     public var shortLabel: String {
-        if let name = name, !name.isEmpty {
-            return name
-        }
-        return id
+        displayLabel
     }
 }
 

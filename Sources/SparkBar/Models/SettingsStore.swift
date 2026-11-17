@@ -163,7 +163,12 @@ public final class SettingsStore: ObservableObject {
     }
 
     public var supportedEffortLevelsForCurrentModel: [String] {
-        currentModelInfo?.supportedEffortLevels ?? []
+        let remoteLevels = currentModelInfo?.supportedEffortLevels ?? ["low", "high", "max"]
+        var levels = ["none"]
+        for lvl in remoteLevels where lvl.lowercased() != "none" {
+            levels.append(lvl)
+        }
+        return levels
     }
 
     public var currentBaseURL: String {
@@ -216,9 +221,9 @@ public final class SettingsStore: ObservableObject {
     }
 
     private func syncEffortLevelWithCurrentModel() {
-        guard let info = currentModelInfo, !info.supportedEffortLevels.isEmpty else { return }
-        if !info.supportedEffortLevels.contains(reasoningEffort) {
-            reasoningEffort = info.defaultEffortLevel ?? info.supportedEffortLevels.first ?? "high"
+        let validLevels = supportedEffortLevelsForCurrentModel
+        if !validLevels.contains(reasoningEffort) {
+            reasoningEffort = currentModelInfo?.defaultEffortLevel ?? "high"
         }
     }
 
