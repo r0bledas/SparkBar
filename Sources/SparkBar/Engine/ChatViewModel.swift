@@ -31,6 +31,7 @@ public final class ChatViewModel: ObservableObject {
         let userMsg = ChatMessage(role: .user, content: prompt)
         messages.append(userMsg)
         isStreaming = true
+        PanelController.shared.syncPanelHeight(hasMessages: true)
 
         currentTask = Task { [weak self] in
             guard let self = self else { return }
@@ -49,6 +50,7 @@ public final class ChatViewModel: ObservableObject {
         stopGeneration()
         messages.removeAll()
         errorMessage = nil
+        PanelController.shared.syncPanelHeight(hasMessages: false)
     }
 
     private func runAgentLoop() async {

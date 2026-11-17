@@ -11,11 +11,16 @@ public struct FloatingPromptView: View {
 
     public init() {}
 
+    private var hasActiveChatArea: Bool {
+        !visibleMessages.isEmpty || viewModel.errorMessage != nil || viewModel.activeToolStatus != nil
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             // 1. Top Conversation / Streaming Area (Appears above the prompt input when messages exist)
-            if !visibleMessages.isEmpty || viewModel.errorMessage != nil || viewModel.activeToolStatus != nil {
+            if hasActiveChatArea {
                 conversationArea
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
                     .opacity(0.45)
@@ -23,12 +28,14 @@ public struct FloatingPromptView: View {
 
             // 2. Prompt Input Box ("Ask anything or run a task…")
             promptInputBar
+                .frame(height: 50)
 
             Divider()
                 .opacity(0.45)
 
             // 3. Bottom Control Bar (Model | Reasoning Effort | Tools & Web | Clear & Settings)
             bottomControlBar
+                .frame(height: 38)
         }
         .background(
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, state: .active)
@@ -39,12 +46,20 @@ public struct FloatingPromptView: View {
                 .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
         )
         .padding(8)
-        .frame(width: 540)
+        .frame(
+            width: PanelController.panelWidth,
+            height: hasActiveChatArea ? PanelController.maxExpandedHeight : PanelController.collapsedHeight,
+            alignment: .bottom
+        )
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }
         .onAppear {
             isInputFocused = true
+            PanelController.shared.syncPanelHeight(hasMessages: hasActiveChatArea)
+        }
+        .onChange(of: hasActiveChatArea) { _, active in
+            PanelController.shared.syncPanelHeight(hasMessages: active)
         }
         .onReceive(PanelController.shared.focusTrigger) { _ in
             isInputFocused = true
@@ -189,7 +204,6 @@ public struct FloatingPromptView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
             }
-            .frame(height: 330)
             .onChange(of: viewModel.messages.last?.content) { _, _ in
                 if let lastId = visibleMessages.last?.id {
                     proxy.scrollTo(lastId, anchor: .bottom)

@@ -101,15 +101,25 @@ public struct WindowDragHandle: NSViewRepresentable {
 public final class PanelController: NSObject, NSWindowDelegate {
     public static let shared = PanelController()
 
+    public static let panelWidth: CGFloat = 540
+    public static let collapsedHeight: CGFloat = 110
+    /// Maximum height follows a 1.2:1 aspect ratio relative to width (540 / 1.2 = 450pt)
+    public static let maxExpandedHeight: CGFloat = 450
+
     private var panel: FloatingPanel?
     public let focusTrigger = PassthroughSubject<Void, Never>()
+
+    /// Fixed bottom-left anchor point on the screen so the panel ALWAYS grows strictly from bottom-to-top
+    /// without ever jumping up or down when sending a message or starting a new chat.
+    private var anchoredBottomOrigin: NSPoint?
+    private var isUpdatingFrame: Bool = false
 
     private override init() {
         super.init()
     }
 
     public func setupPanel<Content: View>(with rootView: Content) {
-        let initialRect = NSRect(x: 0, y: 0, width: 540, height: 114)
+        let initialRect = NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.collapsedHeight)
         let panel = FloatingPanel(contentRect: initialRect)
         panel.delegate = self
         panel.onEscapePressed = { [weak self] in
@@ -121,6 +131,9 @@ public final class PanelController: NSObject, NSWindowDelegate {
         }
 
         let hostingView = NSHostingView(rootView: rootView)
+        // Prevent NSHostingView from expanding the window downward on its own!
+        // PanelController exclusively controls window frame so `origin.y` (the bottom edge) is 100% locked.
+        hostingView.sizingOptions = []
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
         self.panel = panel
@@ -141,7 +154,13 @@ public final class PanelController: NSObject, NSWindowDelegate {
     public func showPanel() {
         guard let panel = panel else { return }
 
-        positionPanelOnActiveScreen(panel)
+        if anchoredBottomOrigin == nil {
+            anchoredBottomOrigin = computeDefaultBottomAnchor()
+        }
+
+        let targetHeight = currentTargetHeight()
+        applyAnchoredFrame(height: targetHeight, animate: false)
+
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         focusTrigger.send()
@@ -151,22 +170,58 @@ public final class PanelController: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
     }
 
-    private func positionPanelOnActiveScreen(_ panel: NSPanel) {
+    /// Strictly resizes the panel from bottom-to-top by keeping `frame.origin.y` locked at `anchoredBottomOrigin.y`.
+    public func syncPanelHeight(hasMessages: Bool) {
+        let targetHeight = hasMessages ? Self.maxExpandedHeight : Self.collapsedHeight
+        applyAnchoredFrame(height: targetHeight, animate: false)
+    }
+
+    private func currentTargetHeight() -> CGFloat {
+        let vm = ChatViewModel.shared
+        let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil
+        return hasMessages ? Self.maxExpandedHeight : Self.collapsedHeight
+    }
+
+    private func applyAnchoredFrame(height: CGFloat, animate: Bool) {
+        guard let panel = panel else { return }
+        let anchor = anchoredBottomOrigin ?? computeDefaultBottomAnchor()
+        anchoredBottomOrigin = anchor
+
+        let newFrame = NSRect(
+            x: anchor.x,
+            y: anchor.y,
+            width: Self.panelWidth,
+            height: height
+        )
+
+        if panel.frame != newFrame {
+            isUpdatingFrame = true
+            panel.setFrame(newFrame, display: true, animate: animate)
+            isUpdatingFrame = false
+        }
+    }
+
+    private func computeDefaultBottomAnchor() -> NSPoint {
         let mouseLocation = NSEvent.mouseLocation
         let activeScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
             ?? NSScreen.main
             ?? NSScreen.screens.first
 
-        guard let screen = activeScreen else { return }
+        guard let screen = activeScreen else {
+            return NSPoint(x: 300, y: 180)
+        }
+
         let visibleFrame = screen.visibleFrame
-        let panelSize = panel.frame.size
+        let x = round(visibleFrame.origin.x + (visibleFrame.width - Self.panelWidth) / 2.0)
+        // Lock the bottom edge near the middle-bottom of the screen (22% above bottom of visible screen)
+        let y = round(visibleFrame.origin.y + visibleFrame.height * 0.22)
+        return NSPoint(x: x, y: y)
+    }
 
-        let x = visibleFrame.origin.x + (visibleFrame.width - panelSize.width) / 2.0
-        // Position near the middle-bottom of the screen (not completely at the bottom)
-        let y = visibleFrame.origin.y + visibleFrame.height * 0.25 - (panelSize.height / 2.0)
-
-        let clampedY = max(visibleFrame.origin.y + 80, min(y, visibleFrame.maxY - panelSize.height - 40))
-        panel.setFrameOrigin(NSPoint(x: x, y: clampedY))
+    public func windowDidMove(_ notification: Notification) {
+        guard !isUpdatingFrame, let panel = panel, panel.isVisible else { return }
+        // If the user drags the window via the bottom bar, update the locked bottom-left anchor to the new spot
+        anchoredBottomOrigin = panel.frame.origin
     }
 
     public func windowDidResignKey(_ notification: Notification) {
