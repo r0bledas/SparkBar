@@ -4,6 +4,7 @@ import AppKit
 public struct FloatingPromptView: View {
     @ObservedObject private var viewModel = ChatViewModel.shared
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var conversationStore = ConversationStore.shared
     @FocusState private var isInputFocused: Bool
     @State private var expandedToolIds: Set<UUID> = []
     @State private var expandedReasoningIds: Set<UUID> = []
@@ -11,19 +12,25 @@ public struct FloatingPromptView: View {
     @State private var isUserScrolledUp: Bool = false
     @State private var scrollToBottomTrigger: Int = 0
     @State private var scrollWheelMonitor: Any? = nil
+    @State private var historySearchText: String = ""
 
     public init() {}
 
     private var hasActiveChatArea: Bool {
-        !visibleMessages.isEmpty || viewModel.errorMessage != nil || viewModel.activeToolStatus != nil
+        !visibleMessages.isEmpty || viewModel.errorMessage != nil || viewModel.activeToolStatus != nil || viewModel.showHistory
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            // 1. Top Conversation / Streaming Area (Appears above the prompt input when messages exist)
+            // 1. Top Conversation / History Area (Appears above the prompt input when messages exist or History is toggled)
             if hasActiveChatArea {
-                conversationArea
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if viewModel.showHistory {
+                    historyBrowserArea
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    conversationArea
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
 
                 Divider()
                     .opacity(0.45)
@@ -667,13 +674,13 @@ public struct FloatingPromptView: View {
 
             if !viewModel.messages.isEmpty {
                 Button {
-                    viewModel.clearConversation()
+                    viewModel.startNewConversation()
                 } label: {
                     HStack(spacing: 3) {
-                        Image(systemName: "trash")
+                        Image(systemName: "plus.bubble")
                             .font(.system(size: 11))
-                        Text("Clear")
-                            .font(.system(size: 11))
+                        Text("New")
+                            .font(.system(size: 11, weight: .medium))
                     }
                     .fixedSize()
                     .foregroundStyle(.secondary)
@@ -681,8 +688,34 @@ public struct FloatingPromptView: View {
                 .buttonStyle(.plain)
                 .fixedSize()
                 .keyboardShortcut("k", modifiers: [.command])
-                .help("Clear conversation (⌘K)")
+                .help("Save to log & start new chat (⌘N / ⌘K)")
             }
+
+            Button {
+                viewModel.toggleHistory()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 11.5, weight: .medium))
+                    if !conversationStore.sessions.isEmpty {
+                        Text("\(conversationStore.sessions.count)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    }
+                }
+                .fixedSize()
+                .foregroundStyle(viewModel.showHistory ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    (viewModel.showHistory ? Color.accentColor.opacity(0.16) : Color.clear),
+                    in: Capsule()
+                )
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .keyboardShortcut("y", modifiers: [.command])
+            .help("Conversation History & Logs (⌘Y)")
+            .accessibilityLabel("Conversation History")
 
             Button {
                 viewModel.showSettings = true
@@ -700,6 +733,191 @@ public struct FloatingPromptView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .frame(height: 38)
+    }
+
+    // MARK: - Conversation History & Log Browser
+
+    private var filteredHistorySessions: [ConversationSession] {
+        let q = historySearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return conversationStore.sessions }
+        return conversationStore.sessions.filter { session in
+            if session.title.lowercased().contains(q) { return true }
+            return session.messages.contains { $0.content.lowercased().contains(q) }
+        }
+    }
+
+    private var historyBrowserArea: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Header & Actions
+            HStack(spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text("Past Conversations")
+                    .font(.system(size: 13.5, weight: .semibold))
+
+                Text("(\(conversationStore.sessions.count))")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    conversationStore.openLogsFolderInFinder()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 10.5))
+                        Text("Logs Folder")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.primary.opacity(0.06), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Open Markdown conversation logs in Finder")
+
+                Button {
+                    viewModel.startNewConversation()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10.5, weight: .bold))
+                        Text("New Chat")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Start a new conversation (⌘N)")
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
+
+            // Search / Filter Input
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                TextField("Search past conversations…", text: $historySearchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                if !historySearchText.isEmpty {
+                    Button {
+                        historySearchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.horizontal, 18)
+
+            // Session List
+            if filteredHistorySessions.isEmpty {
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: "tray")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Text(historySearchText.isEmpty ? "No saved conversations yet." : "No conversations match \"\(historySearchText)\".")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(filteredHistorySessions) { session in
+                            let isCurrent = session.id == viewModel.currentSessionId && !viewModel.messages.isEmpty
+                            HStack(alignment: .top, spacing: 10) {
+                                Button {
+                                    viewModel.loadSession(session)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(spacing: 6) {
+                                            if isCurrent {
+                                                Circle()
+                                                    .fill(Color.accentColor)
+                                                    .frame(width: 6, height: 6)
+                                            }
+                                            Text(session.title)
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Text(Self.formatRelativeDate(session.updatedAt))
+                                                .font(.system(size: 10.5, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                        }
+
+                                        Text(session.previewSnippet)
+                                            .font(.system(size: 11.5))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+
+                                        HStack(spacing: 8) {
+                                            Text("\(session.userAndAssistantMessageCount) msgs")
+                                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                                .foregroundStyle(.secondary)
+                                            if !session.model.isEmpty {
+                                                Text(session.model)
+                                                    .font(.system(size: 10, design: .monospaced))
+                                                    .foregroundStyle(.secondary)
+                                                    .padding(.horizontal, 5)
+                                                    .padding(.vertical, 1)
+                                                    .background(Color.primary.opacity(0.06), in: Capsule())
+                                            }
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    conversationStore.deleteSession(id: session.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                        .padding(6)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Delete this conversation")
+                            }
+                            .padding(10)
+                            .background(
+                                (isCurrent ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.045)),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(isCurrent ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 0.5)
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+    }
+
+    private static func formatRelativeDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private var currentModelBarLabel: String {

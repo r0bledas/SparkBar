@@ -20,7 +20,9 @@ Your design philosophy is inspired by **Hermes Agent** and **OpenCode**:
 - **Session Workspace**:
   - Each session is provisioned with an isolated working directory: `~/Library/Application Support/SparkBar/sessions/<session_id>/`.
   - Temporary files and artifacts should be created in the session workspace or specified target paths, never littering `/tmp`.
-- **Global Invocation**: Summoned via `Option + Space` (`⌥Space`), dismissed via `Escape` or `⌘W`.
+- **Conversation Persistence & Logs**:
+  - All conversations are automatically persisted in `~/Library/Application Support/SparkBar/conversations/sessions.json` and exported as human-readable Markdown transcripts in `~/Library/Application Support/SparkBar/logs/`.
+- **Global Invocation**: Summoned via `Option + Space` (`⌥Space`), dismissed via `Escape` or `⌘W`, history toggled via `⌘Y`, new chat via `⌘N`.
 
 ---
 

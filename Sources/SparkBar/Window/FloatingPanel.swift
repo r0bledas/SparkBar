@@ -6,6 +6,7 @@ import Combine
 public final class FloatingPanel: NSPanel {
     public var onEscapePressed: (() -> Void)?
     public var onNewChatPressed: (() -> Void)?
+    public var onToggleHistoryPressed: (() -> Void)?
 
     public init(contentRect: NSRect) {
         super.init(
@@ -52,6 +53,10 @@ public final class FloatingPanel: NSPanel {
                 onNewChatPressed?()
                 return
             }
+            if char == "y" {
+                onToggleHistoryPressed?()
+                return
+            }
         }
         super.keyDown(with: event)
     }
@@ -65,6 +70,10 @@ public final class FloatingPanel: NSPanel {
             }
             if char == "n" {
                 onNewChatPressed?()
+                return true
+            }
+            if char == "y" {
+                onToggleHistoryPressed?()
                 return true
             }
         }
@@ -207,11 +216,18 @@ public final class PanelController: NSObject, NSWindowDelegate {
         let panel = FloatingPanel(contentRect: initialRect)
         panel.delegate = self
         panel.onEscapePressed = { [weak self] in
-            self?.hidePanel()
+            if ChatViewModel.shared.showHistory {
+                ChatViewModel.shared.toggleHistory()
+            } else {
+                self?.hidePanel()
+            }
         }
         panel.onNewChatPressed = { [weak self] in
-            ChatViewModel.shared.clearConversation()
+            ChatViewModel.shared.startNewConversation()
             self?.focusTrigger.send()
+        }
+        panel.onToggleHistoryPressed = {
+            ChatViewModel.shared.toggleHistory()
         }
 
         let hostingView = NSHostingView(rootView: rootView)
@@ -266,7 +282,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
     private func currentTargetHeight() -> CGFloat {
         let vm = ChatViewModel.shared
-        let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil
+        let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil || vm.showHistory
         return hasMessages ? Self.maxExpandedHeight : Self.collapsedHeight
     }
 

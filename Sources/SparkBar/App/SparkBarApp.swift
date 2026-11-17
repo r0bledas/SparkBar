@@ -116,6 +116,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    public func applicationWillTerminate(_ notification: Notification) {
+        ChatViewModel.shared.persistCurrentSession()
+    }
+
     private func wasLaunchedAtStartup(_ notification: Notification) -> Bool {
         if CommandLine.arguments.contains("--background") {
             return true
@@ -143,6 +147,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
         appMenu.addItem(withTitle: "New Chat", action: #selector(clearConversationAction), keyEquivalent: "n")
+        appMenu.addItem(withTitle: "Conversation History…", action: #selector(toggleHistoryAction), keyEquivalent: "y")
         appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAction), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())
@@ -218,6 +223,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         newChatItem.target = self
         menu.addItem(newChatItem)
 
+        let historyItem = NSMenuItem(
+            title: "Conversation History…",
+            action: #selector(toggleHistoryAction),
+            keyEquivalent: "y"
+        )
+        historyItem.keyEquivalentModifierMask = [.command]
+        historyItem.target = self
+        menu.addItem(historyItem)
+
+        let openLogsItem = NSMenuItem(
+            title: "Open Logs Folder in Finder",
+            action: #selector(openLogsFolderAction),
+            keyEquivalent: ""
+        )
+        openLogsItem.target = self
+        menu.addItem(openLogsItem)
+
         let clearItem = NSMenuItem(
             title: "Clear Prompt",
             action: #selector(clearConversationAction),
@@ -262,8 +284,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func clearConversationAction() {
-        ChatViewModel.shared.clearConversation()
+        ChatViewModel.shared.startNewConversation()
         PanelController.shared.showPanel()
+    }
+
+    @objc private func toggleHistoryAction() {
+        PanelController.shared.showPanel()
+        ChatViewModel.shared.toggleHistory()
+    }
+
+    @objc private func openLogsFolderAction() {
+        ConversationStore.shared.openLogsFolderInFinder()
     }
 
     @objc private func openSettingsAction() {

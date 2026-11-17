@@ -5,12 +5,14 @@ import Combine
 public final class ChatViewModel: ObservableObject {
     public static let shared = ChatViewModel()
 
+    @Published public var currentSessionId: UUID = UUID()
     @Published public var messages: [ChatMessage] = []
     @Published public var inputText: String = ""
     @Published public var isStreaming: Bool = false
     @Published public var activeToolStatus: String? = nil
     @Published public var errorMessage: String? = nil
     @Published public var showSettings: Bool = false
+    @Published public var showHistory: Bool = false
 
     private let client = LLMStreamingClient()
     private var currentTask: Task<Void, Never>?
@@ -27,9 +29,12 @@ public final class ChatViewModel: ObservableObject {
     public func sendPrompt(_ prompt: String) {
         currentTask?.cancel()
         errorMessage = nil
+        showHistory = false
 
         let userMsg = ChatMessage(role: .user, content: prompt)
         messages.append(userMsg)
+        persistCurrentSession()
+
         isStreaming = true
         PanelController.shared.syncPanelHeight(hasMessages: true)
 
@@ -44,13 +49,65 @@ public final class ChatViewModel: ObservableObject {
         currentTask = nil
         isStreaming = false
         activeToolStatus = nil
+        persistCurrentSession()
     }
 
-    public func clearConversation() {
+    /// Archives the current conversation into `ConversationStore` and starts a fresh empty chat (`⌘N` / `New Chat`).
+    public func startNewConversation() {
         stopGeneration()
+        persistCurrentSession()
+        currentSessionId = UUID()
         messages.removeAll()
         errorMessage = nil
+        showHistory = false
+        ConversationStore.shared.activeSessionId = nil
         PanelController.shared.syncPanelHeight(hasMessages: false)
+    }
+
+    /// Backwards-compatible alias used by shortcuts/menus: archives current conversation and resets the bar.
+    public func clearConversation() {
+        startNewConversation()
+    }
+
+    /// Restores a saved conversation from `ConversationStore` so the user can review or continue it.
+    public func loadSession(_ session: ConversationSession) {
+        stopGeneration()
+        persistCurrentSession()
+        currentSessionId = session.id
+        messages = session.messages
+        errorMessage = nil
+        showHistory = false
+        ConversationStore.shared.activeSessionId = session.id
+        PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty)
+    }
+
+    public func toggleHistory() {
+        showHistory.toggle()
+        let shouldExpand = !messages.isEmpty || errorMessage != nil || activeToolStatus != nil || showHistory
+        PanelController.shared.syncPanelHeight(hasMessages: shouldExpand)
+    }
+
+    public func persistCurrentSession() {
+        let meaningfulMessages = messages.filter { msg in
+            switch msg.role {
+            case .user, .tool:
+                return true
+            case .assistant:
+                return !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !(msg.reasoningContent ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !(msg.toolCalls ?? []).isEmpty
+            case .system:
+                return false
+            }
+        }
+        guard !meaningfulMessages.isEmpty else { return }
+        let settings = SettingsStore.shared
+        ConversationStore.shared.upsertSession(
+            id: currentSessionId,
+            messages: meaningfulMessages,
+            provider: settings.selectedProvider.rawValue,
+            model: settings.currentModel
+        )
     }
 
     private func runAgentLoop() async {
@@ -98,6 +155,7 @@ public final class ChatViewModel: ObservableObject {
                 if !result.reasoningContent.isEmpty {
                     messages[assistantIndex].reasoningContent = result.reasoningContent
                 }
+                persistCurrentSession()
 
                 if !result.toolCalls.isEmpty {
                     messages[assistantIndex].toolCalls = result.toolCalls
@@ -115,6 +173,7 @@ public final class ChatViewModel: ObservableObject {
                             toolRecords: [record]
                         )
                         messages.append(toolResultMsg)
+                        persistCurrentSession()
                     }
                     activeToolStatus = nil
                     continue
@@ -122,17 +181,20 @@ public final class ChatViewModel: ObservableObject {
                     break
                 }
             } catch is CancellationError {
+                persistCurrentSession()
                 break
             } catch {
                 if assistantIndex < messages.count && messages[assistantIndex].content.isEmpty {
                     messages.remove(at: assistantIndex)
                 }
                 errorMessage = error.localizedDescription
+                persistCurrentSession()
                 break
             }
         }
 
         activeToolStatus = nil
         isStreaming = false
+        persistCurrentSession()
     }
 }

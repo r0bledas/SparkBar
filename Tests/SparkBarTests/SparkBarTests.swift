@@ -279,4 +279,25 @@ final class SparkBarTests: XCTestCase {
         XCTAssertTrue(result.content.contains("SPARKBAR_OK"), "Got: \(result.content)")
         XCTAssertFalse(streamed.isEmpty)
     }
+
+    @MainActor
+    func testConversationStorePersistenceAndLogs() {
+        let store = ConversationStore.shared
+        let testId = UUID()
+        let msgs = [
+            ChatMessage(role: .user, content: "Test conversation persistence in SparkBar"),
+            ChatMessage(role: .assistant, content: "Persisted and logged to Markdown.")
+        ]
+
+        store.upsertSession(id: testId, messages: msgs, provider: "deepseek", model: "deepseek-chat")
+        XCTAssertTrue(store.sessions.contains(where: { $0.id == testId }))
+
+        if let saved = store.sessions.first(where: { $0.id == testId }) {
+            XCTAssertEqual(saved.title, "Test conversation persistence in SparkBar")
+            XCTAssertEqual(saved.messages.count, 2)
+        }
+
+        store.deleteSession(id: testId)
+        XCTAssertFalse(store.sessions.contains(where: { $0.id == testId }))
+    }
 }
