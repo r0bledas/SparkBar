@@ -104,7 +104,9 @@ public struct WindowDragHandle: NSViewRepresentable {
             let defaultOrigin = PanelController.shared.computeDefaultBottomAnchor()
             let magnetThreshold: CGFloat = 24.0
             let commandSnapThreshold: CGFloat = 64.0
-            var didSnapFeedback = false
+            var wasSnappedX = false
+            var wasSnappedY = false
+            var wasAtExactDefault = false
 
             // Track mouse dragging & modifier flags in real time
             while let nextEvent = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .flagsChanged]) {
@@ -154,12 +156,21 @@ public struct WindowDragHandle: NSViewRepresentable {
                     proposedY = defaultOrigin.y
                 }
 
-                if (nearDefaultX || nearDefaultY) && !didSnapFeedback {
-                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
-                    didSnapFeedback = true
-                } else if !nearDefaultX && !nearDefaultY {
-                    didSnapFeedback = false
+                let isSnappedX = (proposedX == defaultOrigin.x)
+                let isSnappedY = (proposedY == defaultOrigin.y)
+                let isAtExactDefault = isSnappedX && isSnappedY
+
+                if isAtExactDefault && !wasAtExactDefault {
+                    // Strong tactile bump when magneting onto the exact default origin
+                    NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+                } else if (isSnappedX && !wasSnappedX) || (isSnappedY && !wasSnappedY) {
+                    // Crisp alignment tick when crossing onto either the X or Y axis
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
                 }
+
+                wasSnappedX = isSnappedX
+                wasSnappedY = isSnappedY
+                wasAtExactDefault = isAtExactDefault
 
                 let newOrigin = NSPoint(x: round(proposedX), y: round(proposedY))
                 window.setFrameOrigin(newOrigin)
