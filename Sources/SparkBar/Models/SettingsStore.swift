@@ -298,23 +298,29 @@ public final class SettingsStore: ObservableObject {
     }
 
     private func updateLaunchAtLogin(enabled: Bool) {
-        if #available(macOS 13.0, *) {
+        let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        let plistURL = launchAgentsDir.appendingPathComponent("com.sparkbar.app.plist")
+
+        var usedSMAppService = false
+        if #available(macOS 13.0, *), Bundle.main.bundleURL.pathExtension == "app" {
             do {
                 if enabled {
                     try SMAppService.mainApp.register()
                 } else {
                     try SMAppService.mainApp.unregister()
                 }
+                usedSMAppService = true
             } catch {
-                // Fallback to LaunchAgent plist below for unsigned/local builds
+                usedSMAppService = false
             }
         }
 
-        let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        let plistURL = launchAgentsDir.appendingPathComponent("com.sparkbar.app.plist")
-
-        if enabled {
+        // Only use LaunchAgent plist if SMAppService was unavailable (e.g. non-.app CLI build).
+        // Never keep both active at once, or macOS will spawn two instances on login.
+        if usedSMAppService || !enabled {
+            try? FileManager.default.removeItem(at: plistURL)
+        } else if enabled {
             let executablePath = Bundle.main.executablePath
                 ?? "/Applications/SparkBar.app/Contents/MacOS/SparkBar"
             let plistContent = """
@@ -335,8 +341,6 @@ public final class SettingsStore: ObservableObject {
             """
             try? FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
             try? plistContent.write(to: plistURL, atomically: true, encoding: .utf8)
-        } else {
-            try? FileManager.default.removeItem(at: plistURL)
         }
     }
 

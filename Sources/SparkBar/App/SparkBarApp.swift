@@ -16,6 +16,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // Single-instance guard: if another SparkBar process is already running, terminate this duplicate immediately.
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.sparkbar.app"
+        let duplicates = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .filter { $0.processIdentifier != currentPID }
+        if !duplicates.isEmpty {
+            NSApp.terminate(nil)
+            return
+        }
+
         // Run as a lightweight accessory / menu bar agent without cluttering the Dock
         NSApp.setActivationPolicy(.accessory)
 
