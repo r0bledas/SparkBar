@@ -117,18 +117,18 @@ public final class JobManager: @unchecked Sendable {
         }
 
         let pid = process.processIdentifier
-        lock.lock()
-        jobs[jobId] = ManagedJob(
-            id: jobId,
-            command: command,
-            pid: pid,
-            startedAt: Date(),
-            isRunning: true,
-            exitCode: nil,
-            outputBuffer: "",
-            process: process
+        registerJob(
+            ManagedJob(
+                id: jobId,
+                command: command,
+                pid: pid,
+                startedAt: Date(),
+                isRunning: true,
+                exitCode: nil,
+                outputBuffer: "",
+                process: process
+            )
         )
-        lock.unlock()
 
         // Asynchronously stream stdout/stderr into the job's buffer
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -189,6 +189,12 @@ public final class JobManager: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func registerJob(_ job: ManagedJob) {
+        lock.lock()
+        jobs[job.id] = job
+        lock.unlock()
     }
 
     private func appendJobOutput(jobId: String, chunk: String, pwdMarker: String) {
@@ -347,19 +353,24 @@ public final class NativePDFRenderer: NSObject, WKNavigationDelegate {
             guard let self = self, let cont = self.continuation else { return }
             self.continuation = nil
 
-            do {
-                let pdfConfig = WKPDFConfiguration()
-                let pdfData = try await webView.createPDF(configuration: pdfConfig)
-                let outURL = URL(fileURLWithPath: self.outputPath)
-                try FileManager.default.createDirectory(at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try pdfData.write(to: outURL, options: .atomic)
-
+            let pdfConfig = WKPDFConfiguration()
+            webView.createPDF(configuration: pdfConfig) { [weak self] result in
+                guard let self = self else { return }
                 self.webView = nil
-                let (info, isErr) = Self.inspectPDF(at: self.outputPath)
-                cont.resume(returning: ("Successfully generated PDF:\n\(info)", isErr))
-            } catch {
-                self.webView = nil
-                cont.resume(returning: ("Failed to generate PDF: \(error.localizedDescription)", true))
+                switch result {
+                case .success(let pdfData):
+                    do {
+                        let outURL = URL(fileURLWithPath: self.outputPath)
+                        try FileManager.default.createDirectory(at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try pdfData.write(to: outURL, options: .atomic)
+                        let (info, isErr) = Self.inspectPDF(at: self.outputPath)
+                        cont.resume(returning: ("Successfully generated PDF:\n\(info)", isErr))
+                    } catch {
+                        cont.resume(returning: ("Failed to write PDF: \(error.localizedDescription)", true))
+                    }
+                case .failure(let error):
+                    cont.resume(returning: ("Failed to generate PDF: \(error.localizedDescription)", true))
+                }
             }
         }
     }
