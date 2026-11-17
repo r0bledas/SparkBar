@@ -1,4 +1,26 @@
-# ⚡ SparkBar
+<p align="center">
+  <img src="Assets/AppIcon-1024.png" width="136" height="136" alt="SparkBar Icon" />
+</p>
+
+<h1 align="center">SparkBar</h1>
+
+<p align="center">
+  <strong>Ultra-lightweight, 100% native macOS AI Spotlight Launcher (<code>⌥ + Space</code>) & Autonomous Tool Agent</strong><br/>
+  Built with pure Swift, SwiftUI, and AppKit (<code>NSPanel</code>) — zero Electron bloat.
+</p>
+
+<p align="center">
+  <a href="https://github.com/r0bledas/SparkBar/releases/latest">
+    <img src="https://img.shields.io/github/v/release/r0bledas/SparkBar?style=flat-square&color=00b4d8" alt="Latest Release" />
+  </a>
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue?style=flat-square" alt="macOS 14+" />
+  <img src="https://img.shields.io/badge/Swift-6.0-orange?style=flat-square" alt="Swift 6.0" />
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License" />
+  </a>
+</p>
+
+---
 
 **SparkBar** is an ultra-lightweight, 100% native macOS AI launcher and autonomous tool agent built with **Swift, SwiftUI, and AppKit** (`NSPanel`).
 
@@ -8,48 +30,39 @@ Press **`⌥ + Space`** (`Option + Space`) from anywhere on your Mac to summon a
 
 ## ✨ Features
 
-* **Featherweight Native Architecture:** Pure Swift & AppKit `NSPanel` with `.nonactivatingPanel` and `NSVisualEffectView` HUD blur—zero Chromium/Electron bloat.
-* **Instant Global Hotkey (`⌥ + Space`):** Registered via native macOS Carbon Event Manager (`RegisterEventHotKey`). Press `Option + Space` to summon or dismiss, or `Esc` to hide.
-* **Hermes Agent & OpenCode-Inspired Tool Engine:**
-  * **Server-Side Web Search:** Supports OpenRouter `:online` grounding, DeepSeek, and Perplexity out of the box with zero local harness overhead.
-  * **Native Autonomous Function Calling Loop:** Multi-turn tool execution built directly in Swift:
-    * `web_search` — Live web search via DuckDuckGo HTML & Instant Answer API.
-    * `fetch_url` — Clean text extraction from any web page.
-    * `run_command` — Execute local shell commands (`zsh`) with timeout protection.
-    * `read_file` / `write_file` / `list_directory` — Fast local file system inspection and editing.
-    * `clipboard` — Read from or write directly to the macOS clipboard (`NSPasteboard`).
-* **Multi-Provider Streaming (`URLSession` Async SSE):**
-  * **DeepSeek** (`deepseek-chat`, `deepseek-reasoner` with collapsible Thought Process view)
-  * **OpenAI** (`gpt-4o-mini`, `gpt-4o`, `gpt-4.1`, `o3-mini`)
-  * **OpenRouter** (`deepseek/deepseek-chat:online`, `anthropic/claude-3.5-sonnet:online`, etc.)
-  * **Anthropic Claude** (Native `/v1/messages` streaming & tool use)
-  * **Groq**, **Google Gemini**, and **Local Ollama / LM Studio** (`http://127.0.0.1:11434/v1`)
-* **Rich Markdown & Code Blocks:** Syntax-styled code blocks with one-click copy buttons.
+* **Featherweight Native Architecture:** Pure Swift & AppKit `NSPanel` with `.nonactivatingPanel`, `NSVisualEffectView` HUD blur, and magnetic axis snapping with trackpad haptic alignment—zero Chromium/Electron bloat.
+* **Instant Global Hotkey (`⌥ + Space`):** Registered via native macOS Carbon Event Manager (`RegisterEventHotKey`). Press `Option + Space` to summon or dismiss from any space or full-screen app.
+* **Zero-Discovery Host Environment Manifest:** Automatically captures your login shell `PATH` (`/bin/zsh -lc`, Homebrew, Node, Rust/Cargo, Python) once at startup and injects a pre-probed environment manifest into the system prompt so the agent never wastes turns guessing installed tools.
+* **Hermes Agent & OpenCode-Inspired Autonomous Tool Engine:**
+  * `run_command` — Stateful login-shell execution (`cd` persists across turns) with a 30s synchronous window and automatic promotion to tracked background jobs.
+  * `job_status` / `job_cancel` — Monitor live stdout/stderr, PID, and exit codes of background builds or long-running scripts.
+  * `render_pdf` & `pdf_info` — Native 1-call HTML/Markdown to PDF generation (`WKWebView.createPDF`) and reliable page count/metadata verification via macOS `PDFKit`.
+  * `web_search` & `fetch_url` — Live web search via native offscreen WebKit rendering and clean readable text extraction.
+  * `read_file` / `write_file` / `list_directory` — Fast local filesystem inspection and editing.
+  * `clipboard` — Read from or write directly to the macOS system pasteboard (`NSPasteboard`).
+* **Persistent Conversation History & Markdown Logs (`⌘ + Y`):**
+  * Every conversation, reasoning chain, and tool execution is automatically persisted in `~/Library/Application Support/SparkBar/conversations/` and exported as clean human-readable `.md` logs in `~/Library/Application Support/SparkBar/logs/`.
+  * Browse, search, and resume any past conversation directly inside SparkBar via `⌘ + Y` or the History button.
+* **Dynamic API Model Discovery (`GET /v1/models`):**
+  * Automatically fetches live models and supported Thinking Effort levels (`None`, `Default`, `Low`, `High`, `Max`) from **DeepSeek**, **OpenAI**, **OpenRouter**, **Anthropic Claude**, **Groq**, **Google Gemini**, and **Local Ollama / LM Studio**.
+* **Rich Markdown, Tables & Native LaTeX Rendering:**
+  * Supports GitHub-flavored Markdown tables, ASCII box-drawing tables, syntax-styled code blocks, and native KaTeX math blocks (`$$...$$` and `$...$`).
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Build & Run via Swift Package Manager
+### 1. Download Prebuilt macOS `.dmg`
+Grab the latest `SparkBar.dmg` from [**GitHub Releases**](https://github.com/r0bledas/SparkBar/releases/latest) and drag `SparkBar.app` into `/Applications`.
+
+### 2. Build & Run from Source (Swift Package Manager)
 
 ```bash
 git clone https://github.com/r0bledas/SparkBar.git
 cd SparkBar
-swift run
-```
-
-### 2. Package as a Standalone macOS `.app` Bundle
-
-```bash
-chmod +x Scripts/package_app.sh
 ./Scripts/package_app.sh
-open dist/SparkBar.app
-```
-
-You can also copy `dist/SparkBar.app` directly into `/Applications`:
-
-```bash
 cp -R dist/SparkBar.app /Applications/
+open /Applications/SparkBar.app
 ```
 
 ---
@@ -60,8 +73,9 @@ cp -R dist/SparkBar.app /Applications/
 | :--- | :--- |
 | **`⌥ + Space`** (`Option + Space`) | Summon or hide SparkBar from any app or full-screen space |
 | **`Return`** | Send prompt |
-| **`Esc`** | Dismiss floating panel |
-| **`⌘ + K`** | Clear conversation & start fresh |
+| **`Esc` / `⌘ + W`** | Dismiss floating panel (or close History view) |
+| **`⌘ + N` / `⌘ + K`** | Save current thread to log & start a New Chat |
+| **`⌘ + Y`** | Toggle Conversation History & Logs browser |
 | **`⌘ + ,`** | Open Settings & API Keys |
 | **`⌘ + Q`** | Quit SparkBar |
 
@@ -70,7 +84,7 @@ cp -R dist/SparkBar.app /Applications/
 ## 🔑 Configuring API Keys
 
 You can configure your API keys in two ways:
-1. **In-App Settings (`⌘ + ,`):** Select your provider (DeepSeek, OpenAI, OpenRouter, Anthropic, Groq, Gemini, or Ollama) and paste your key. Keys are stored in the macOS Keychain.
+1. **In-App Settings (`⌘ + ,`):** Select your provider (DeepSeek, OpenAI, OpenRouter, Anthropic, Groq, Gemini, or Ollama) and paste your key. Keys are stored securely in the macOS Keychain.
 2. **Environment Variables:** SparkBar automatically detects `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, and `GEMINI_API_KEY`.
 
 ---
