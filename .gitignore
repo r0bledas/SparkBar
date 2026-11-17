@@ -1,0 +1,21 @@
+# Xcode / SwiftPM
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Build artifacts
+build/
+dist/
+*.app
+*.dmg
+*.zip
+
+# macOS
+.DS_Store
+
+# Secrets
+.env
+*.local.json
