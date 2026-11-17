@@ -225,6 +225,9 @@ public struct SettingsSheetView: View {
 
                         Toggle("Open SparkBar automatically on startup", isOn: $settings.openOnStartup)
                             .font(.system(size: 13))
+
+                        Toggle("Show SparkBar icon in the menu bar", isOn: $settings.showMenuBarIcon)
+                            .font(.system(size: 13))
                     }
                 }
                 .padding(.trailing, 4)

@@ -103,6 +103,13 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    @Published public var showMenuBarIcon: Bool {
+        didSet {
+            UserDefaults.standard.set(showMenuBarIcon, forKey: "sparkbar.showMenuBarIcon")
+            NotificationCenter.default.post(name: NSNotification.Name("SparkBarMenuBarVisibilityChanged"), object: nil)
+        }
+    }
+
     @Published public var temperature: Double {
         didSet {
             UserDefaults.standard.set(temperature, forKey: "sparkbar.temperature")
@@ -143,6 +150,7 @@ public final class SettingsStore: ObservableObject {
         self.enableServerSideSearch = defaults.object(forKey: "sparkbar.enableServerSideSearch") as? Bool ?? true
         self.pinWindowOnBlur = defaults.object(forKey: "sparkbar.pinWindowOnBlur") as? Bool ?? false
         self.openOnStartup = defaults.object(forKey: "sparkbar.openOnStartup") as? Bool ?? false
+        self.showMenuBarIcon = defaults.object(forKey: "sparkbar.showMenuBarIcon") as? Bool ?? true
         self.temperature = defaults.object(forKey: "sparkbar.temperature") as? Double ?? 0.3
 
         bootstrapLocalKeysIfNeeded()

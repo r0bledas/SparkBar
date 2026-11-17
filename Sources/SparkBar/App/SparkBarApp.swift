@@ -25,7 +25,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         setupMainMenuWithEditCommands()
-        setupStatusBarItem()
+        updateStatusBarItemVisibility()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMenuBarVisibilityChanged),
+            name: NSNotification.Name("SparkBarMenuBarVisibilityChanged"),
+            object: nil
+        )
+
         PanelController.shared.setupPanel(with: FloatingPromptView())
 
         HotkeyManager.shared.onToggle = {
@@ -66,6 +74,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
 
         NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func handleMenuBarVisibilityChanged() {
+        updateStatusBarItemVisibility()
+    }
+
+    private func updateStatusBarItemVisibility() {
+        if SettingsStore.shared.showMenuBarIcon {
+            if statusItem == nil {
+                setupStatusBarItem()
+            }
+        } else {
+            if let item = statusItem {
+                NSStatusBar.system.removeStatusItem(item)
+                statusItem = nil
+            }
+        }
     }
 
     private func setupStatusBarItem() {
