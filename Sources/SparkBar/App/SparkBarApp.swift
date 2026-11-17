@@ -51,8 +51,34 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         HotkeyManager.shared.registerDefaultHotkey()
 
-        // Show the floating bar immediately on launch so the user sees it right away
+        // If launched automatically at login/restart, stay silent in the background until ⌥Space is pressed.
+        // If launched manually by the user, show the floating bar right away.
+        if !wasLaunchedAtStartup(notification) {
+            PanelController.shared.showPanel()
+        }
+    }
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         PanelController.shared.showPanel()
+        return true
+    }
+
+    private func wasLaunchedAtStartup(_ notification: Notification) -> Bool {
+        if CommandLine.arguments.contains("--background") {
+            return true
+        }
+        // Standard macOS AppleEvent flag when launched as a Login Item
+        if let event = NSAppleEventManager.shared().currentAppleEvent,
+           event.eventID == kAEOpenApplication,
+           let prop = event.paramDescriptor(forKeyword: keyAEPropData),
+           prop.enumCodeValue == keyAELaunchedAsLogInItem {
+            return true
+        }
+        // Also guard early boot window if Open on Startup is enabled
+        if SettingsStore.shared.openOnStartup && ProcessInfo.processInfo.systemUptime < 90 {
+            return true
+        }
+        return false
     }
 
     private func setupMainMenuWithEditCommands() {

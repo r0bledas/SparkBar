@@ -333,6 +333,7 @@ public final class SettingsStore: ObservableObject {
                 <key>ProgramArguments</key>
                 <array>
                     <string>\(executablePath)</string>
+                    <string>--background</string>
                 </array>
                 <key>RunAtLoad</key>
                 <true/>

@@ -2,12 +2,12 @@
 set -euo pipefail
 
 APP_NAME="SparkBar"
-VERSION="1.0.0"
+VERSION="${1:-1.0.1}"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 STAGE_DIR="dist/dmg_stage"
 DMG_PATH="dist/${DMG_NAME}"
 
-./Scripts/package_app.sh
+./Scripts/package_app.sh "${VERSION}"
 
 rm -rf "${STAGE_DIR}" "${DMG_PATH}"
 mkdir -p "${STAGE_DIR}"
