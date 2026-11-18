@@ -413,7 +413,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
 /// Custom field editor for the prompt `TextField` that intercepts dragged screenshots and image files
 /// (such as macOS bottom-right screenshot previews from `/var/folders/.../NSIRD_screencaptureui_...`)
 /// and attaches them as images instead of pasting their file path into the text box.
-public final class SparkBarFieldEditor: NSTextView {
+public class SparkBarFieldEditor: NSTextView {
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         if Self.canHandleImageDrag(sender.draggingPasteboard) {
             return .copy
