@@ -45,6 +45,16 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
 
 ## ✨ Features
 
+* **Standalone Native macOS Settings Window (`⌘ + ,`):**
+  * Opens as a real, independent macOS `NSWindow` (`[.titled, .closable, .miniaturizable, .resizable]`) with standard window controls—completely decoupled from the floating prompt panel.
+* **1-Click Self-Update from GitHub:**
+  * Sync directly from `r0bledas/SparkBar` on GitHub with a single click in Settings or the menu bar (`Update from GitHub…`). Automatically pulls the latest `main` commit, builds a release bundle, installs to `/Applications/SparkBar.app`, and relaunches.
+* **Smooth Window Dragging & Magnetic Snapping:**
+  * Move the panel anytime using the top drag bar or bottom control bar. Features magnetic snapping to your screen's optimal bottom anchor and `⌘`-locked horizontal/vertical axis alignment with native trackpad haptic alignment ticks.
+* **Image Attachments & Instant Speech-Bubble Previews:**
+  * Drag & drop images, screenshots, or paste from clipboard (`⌘ + V`). Hovering over any image thumbnail instantly displays a speech-bubble popover with the file name on the top layer without layout shifts.
+* **Multi-Line Wrapping Input Bar:**
+  * Wraps lengthy prompts cleanly across lines with top/bottom edge gradient fading, keeping the input height compact and the cursor always visible.
 * **Featherweight Native Architecture:** Pure Swift & AppKit `NSPanel` with `.nonactivatingPanel`, `NSVisualEffectView` HUD blur, and magnetic axis snapping with trackpad haptic alignment—zero Chromium/Electron bloat.
 * **Instant Global Hotkey (`⌥ + Space`):** Registered via native macOS Carbon Event Manager (`RegisterEventHotKey`). Press `Option + Space` to summon or dismiss from any space or full-screen app.
 * **Zero-Discovery Host Environment Manifest:** Automatically captures your login shell `PATH` (`/bin/zsh -lc`, Homebrew, Node, Rust/Cargo, Python) once at startup and injects a pre-probed environment manifest into the system prompt so the agent never wastes turns guessing installed tools.
