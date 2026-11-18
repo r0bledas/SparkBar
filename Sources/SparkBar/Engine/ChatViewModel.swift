@@ -20,12 +20,14 @@ public final class ChatViewModel: ObservableObject {
     @Published public var errorMessage: String? = nil
     @Published public var showSettings: Bool = false
     @Published public var showHistory: Bool = false
+    @Published public var pendingModelSwitchBanner: String? = nil
 
     private let client = LLMStreamingClient()
     private var currentTask: Task<Void, Never>?
     private var isSanitizingInput: Bool = false
     public let scrollToMessageTrigger = PassthroughSubject<UUID, Never>()
     private var pendingModelSwitchNote: String? = nil
+    private var pendingModelId: String? = nil
 
     public init() {}
 
@@ -74,13 +76,16 @@ public final class ChatViewModel: ObservableObject {
         let imagesToSend = attachedImages
         attachedImages = []
 
-        var finalPrompt = prompt
-        if let switchNote = pendingModelSwitchNote {
-            finalPrompt = "[System Note: \(switchNote)]\n\n" + prompt
-            pendingModelSwitchNote = nil
+        if let queuedModelId = pendingModelId {
+            SettingsStore.shared.currentModel = queuedModelId
+            pendingModelId = nil
         }
+        pendingModelSwitchBanner = nil
 
-        let userMsg = ChatMessage(role: .user, content: finalPrompt, attachedImages: imagesToSend)
+        let switchNote = pendingModelSwitchNote
+        pendingModelSwitchNote = nil
+
+        let userMsg = ChatMessage(role: .user, content: prompt, attachedImages: imagesToSend, systemNote: switchNote)
         messages.append(userMsg)
         persistCurrentSession()
 
@@ -206,9 +211,27 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Inserts an inline divider when the user switches models mid-conversation and queues a context note for the next turn.
-    public func handleModelSwitch(from oldModel: String, to newModel: String) {
-        guard !messages.isEmpty, !newModel.isEmpty, oldModel != newModel else { return }
+    /// Inserts or replaces an inline divider when the user switches models mid-conversation,
+    /// queues a context note for the next turn, and defers live model mutation if currently streaming.
+    public func handleModelSwitch(from oldModel: String, to newModel: String, newModelId: String) {
+        guard !newModel.isEmpty, oldModel != newModel else { return }
+
+        if isStreaming {
+            pendingModelId = newModelId
+            pendingModelSwitchBanner = "Model switch to \(newModel) will be performed on next turn"
+        } else {
+            SettingsStore.shared.currentModel = newModelId
+            pendingModelId = nil
+            pendingModelSwitchBanner = nil
+        }
+
+        guard !messages.isEmpty else { return }
+
+        // If the user switched models again without sending a turn in between, replace the previous divider
+        if let last = messages.last, last.role == .system, last.content.hasPrefix("Switched to:") {
+            messages.removeLast()
+        }
+
         let dividerMsg = ChatMessage(role: .system, content: "Switched to: \(newModel)")
         messages.append(dividerMsg)
         pendingModelSwitchNote = "The user switched the active model from '\(oldModel)' to '\(newModel)'. Continue the conversation seamlessly with full awareness of this model change."
@@ -330,6 +353,11 @@ public final class ChatViewModel: ObservableObject {
 
         activeToolStatus = nil
         isStreaming = false
+        if let queuedModelId = pendingModelId {
+            SettingsStore.shared.currentModel = queuedModelId
+            pendingModelId = nil
+            pendingModelSwitchBanner = nil
+        }
         persistCurrentSession()
     }
 }

@@ -175,6 +175,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
     public var toolName: String?
     public var toolRecords: [ToolExecutionRecord]
     public var attachedImages: [AttachedImage]
+    public var systemNote: String?
     public var timestamp: Date
 
     public init(
@@ -187,6 +188,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         toolName: String? = nil,
         toolRecords: [ToolExecutionRecord] = [],
         attachedImages: [AttachedImage] = [],
+        systemNote: String? = nil,
         timestamp: Date = Date()
     ) {
         self.id = id
@@ -198,11 +200,12 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         self.toolName = toolName
         self.toolRecords = toolRecords
         self.attachedImages = attachedImages
+        self.systemNote = systemNote
         self.timestamp = timestamp
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, role, content, reasoningContent, toolCalls, toolCallId, toolName, toolRecords, attachedImages, timestamp
+        case id, role, content, reasoningContent, toolCalls, toolCallId, toolName, toolRecords, attachedImages, systemNote, timestamp
     }
 
     public init(from decoder: Decoder) throws {
@@ -216,6 +219,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         self.toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
         self.toolRecords = try container.decodeIfPresent([ToolExecutionRecord].self, forKey: .toolRecords) ?? []
         self.attachedImages = try container.decodeIfPresent([AttachedImage].self, forKey: .attachedImages) ?? []
+        self.systemNote = try container.decodeIfPresent(String.self, forKey: .systemNote)
         self.timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
     }
 }

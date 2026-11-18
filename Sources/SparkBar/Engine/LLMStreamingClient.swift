@@ -287,13 +287,19 @@ public final class LLMStreamingClient {
             case .system:
                 apiMessages.append(["role": "system", "content": msg.content])
             case .user:
+                let apiUserText: String
+                if let note = msg.systemNote, !note.isEmpty {
+                    apiUserText = "[System Note: \(note)]\n\n" + msg.content
+                } else {
+                    apiUserText = msg.content
+                }
                 let lowerModel = model.lowercased()
                 let isTextOnlyDeepSeek = (provider == .deepseek && !lowerModel.contains("flash") && !lowerModel.contains("vl") && !lowerModel.contains("vision"))
                 if msg.attachedImages.isEmpty {
-                    apiMessages.append(["role": "user", "content": msg.content])
+                    apiMessages.append(["role": "user", "content": apiUserText])
                 } else if isTextOnlyDeepSeek {
                     // DeepSeek Pro / Reasoner is text-only: enrich prompt with on-device Vision OCR + local file path
-                    var enriched = msg.content
+                    var enriched = apiUserText
                     for img in msg.attachedImages {
                         let ocr = VisionOCRHelper.recognizeText(from: img.base64Data)
                         var block = "\n\n[Attached Image: \(img.fileName ?? "image.png")"
@@ -310,8 +316,8 @@ public final class LLMStreamingClient {
                 } else {
                     // Vision-enabled multimodal payload (DeepSeek Flash, OpenAI, OpenRouter, Gemini, Groq, Ollama)
                     var contentParts: [[String: Any]] = []
-                    if !msg.content.isEmpty {
-                        contentParts.append(["type": "text", "text": msg.content])
+                    if !apiUserText.isEmpty {
+                        contentParts.append(["type": "text", "text": apiUserText])
                     }
                     for img in msg.attachedImages {
                         contentParts.append([
@@ -478,8 +484,14 @@ public final class LLMStreamingClient {
         for msg in messages {
             switch msg.role {
             case .user:
+                let apiUserText: String
+                if let note = msg.systemNote, !note.isEmpty {
+                    apiUserText = "[System Note: \(note)]\n\n" + msg.content
+                } else {
+                    apiUserText = msg.content
+                }
                 if msg.attachedImages.isEmpty {
-                    anthropicMessages.append(["role": "user", "content": msg.content])
+                    anthropicMessages.append(["role": "user", "content": apiUserText])
                 } else {
                     var contentBlocks: [[String: Any]] = []
                     for img in msg.attachedImages {
@@ -492,8 +504,8 @@ public final class LLMStreamingClient {
                             ]
                         ])
                     }
-                    if !msg.content.isEmpty {
-                        contentBlocks.append(["type": "text", "text": msg.content])
+                    if !apiUserText.isEmpty {
+                        contentBlocks.append(["type": "text", "text": apiUserText])
                     }
                     anthropicMessages.append(["role": "user", "content": contentBlocks])
                 }

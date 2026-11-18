@@ -48,6 +48,25 @@ public struct FloatingPromptView: View {
                     .opacity(0.35)
             }
 
+            // Deferred model-switch notice banner (shown when switching models mid-turn)
+            if let switchBanner = viewModel.pendingModelSwitchBanner {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Color.accentColor)
+                    Text(switchBanner)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 5)
+                .background(Color.accentColor.opacity(0.08))
+                Divider()
+                    .opacity(0.3)
+            }
+
             // 2. Prompt Input Box ("Ask anything or run a task…")
             promptInputBar
                 .frame(height: 50)
@@ -136,8 +155,9 @@ public struct FloatingPromptView: View {
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16.5, weight: .regular))
-                .frame(maxWidth: .infinity)
-                .padding(.trailing, 4)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+                .clipped()
                 .focused($isInputFocused)
                 .onSubmit {
                     viewModel.sendCurrentPrompt()
@@ -162,13 +182,14 @@ public struct FloatingPromptView: View {
                 Button {
                     viewModel.sendCurrentPrompt()
                 } label: {
-                    Image(systemName: "arrow.up.circle.fill")
+                    Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(
                             canSend ? Color.accentColor : Color.secondary.opacity(0.35)
                         )
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .disabled(!canSend)
                 .help("Send prompt (Return)")
                 .accessibilityLabel("Send prompt")
@@ -569,14 +590,14 @@ public struct FloatingPromptView: View {
 
     private var bottomControlBar: some View {
         HStack(spacing: 10) {
-            // Attachment icon on the left of the model selector (icon only, no counter)
+            // Attachment icon on the left of the model selector (compact width, icon only)
             Button {
                 selectImageFromFilePicker()
             } label: {
                 Image(systemName: "paperclip")
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary : Color.accentColor)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, 2)
                     .padding(.vertical, 3)
                     .background(
                         (viewModel.attachedImages.isEmpty ? Color.clear : Color.accentColor.opacity(0.14)),
@@ -634,8 +655,7 @@ public struct FloatingPromptView: View {
                     ForEach(settings.availableModels) { modelInfo in
                         Button {
                             let oldLabel = currentModelBarLabel
-                            settings.currentModel = modelInfo.id
-                            viewModel.handleModelSwitch(from: oldLabel, to: modelInfo.displayLabel)
+                            viewModel.handleModelSwitch(from: oldLabel, to: modelInfo.displayLabel, newModelId: modelInfo.id)
                         } label: {
                             HStack {
                                 Text(modelInfo.displayLabel)
