@@ -209,7 +209,7 @@ public struct FloatingPromptView: View {
         HStack(spacing: 12) {
             WrappingPromptTextView(
                 text: $viewModel.inputText,
-                placeholder: "Ask anything or run a task… (⌥Space)",
+                placeholder: "Ask anything or run a task… (⌥ + Space)",
                 onSubmit: {
                     viewModel.sendCurrentPrompt()
                 }
