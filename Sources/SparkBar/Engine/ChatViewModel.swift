@@ -298,6 +298,7 @@ public final class ChatViewModel: ObservableObject {
                         if Task.isCancelled { break }
                         activeToolStatus = "Running \(call.name)..."
                         let record = await ToolExecutor.execute(call)
+                        if Task.isCancelled { break }
 
                         let toolResultMsg = ChatMessage(
                             role: .tool,

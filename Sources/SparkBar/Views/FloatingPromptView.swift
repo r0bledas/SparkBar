@@ -133,11 +133,6 @@ public struct FloatingPromptView: View {
 
     private var promptInputBar: some View {
         HStack(spacing: 11) {
-            SparkBarLogoView(
-                size: 21,
-                isActive: viewModel.isStreaming || !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedImages.isEmpty
-            )
-
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16.5, weight: .regular))
@@ -149,19 +144,6 @@ public struct FloatingPromptView: View {
                 }
                 .accessibilityLabel("Prompt Input")
 
-            if !viewModel.inputText.isEmpty {
-                Button {
-                    viewModel.inputText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .accessibilityLabel("Clear input text")
-            }
-
             if viewModel.isStreaming {
                 Button {
                     viewModel.stopGeneration()
@@ -169,8 +151,10 @@ public struct FloatingPromptView: View {
                     Image(systemName: "stop.circle.fill")
                         .font(.system(size: 20))
                         .foregroundStyle(.red)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .help("Stop generating")
                 .accessibilityLabel("Stop generating")
             } else {
