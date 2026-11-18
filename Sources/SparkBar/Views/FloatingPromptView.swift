@@ -28,16 +28,15 @@ public struct FloatingPromptView: View {
         VStack(spacing: 0) {
             // 1. Top Conversation / History Area (Appears above the prompt input when messages exist or History is toggled)
             if hasActiveChatArea {
-                // Dedicated top window drag bar so the user can always grab the top of the panel in chat/history mode
-                ZStack {
-                    WindowDragHandle()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    Capsule()
-                        .fill(Color.primary.opacity(0.20))
-                        .frame(width: 36, height: 4)
-                        .allowsHitTesting(false)
-                }
-                .frame(height: 16)
+                // Dedicated top window drag bar (outside the ScrollView, identical to bottomControlBar's drag handle)
+                WindowDragHandle()
+                    .frame(maxWidth: .infinity, minHeight: 20, maxHeight: 20)
+                    .overlay(
+                        Capsule()
+                            .fill(Color.primary.opacity(0.22))
+                            .frame(width: 38, height: 4.5)
+                            .allowsHitTesting(false)
+                    )
 
                 if viewModel.showHistory {
                     historyBrowserArea
@@ -142,6 +141,7 @@ public struct FloatingPromptView: View {
                     .allowsHitTesting(false)
                 }
             }
+            .allowsHitTesting(false)
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -283,18 +283,16 @@ public struct FloatingPromptView: View {
                                 let nextMsg = items[index + 1]
                                 if isBotChainItem(msg) && isBotChainItem(nextMsg) {
                                     // White vertical connector line aligned after 2x the corner-rounding inset (12pt * 2 = 24pt)
-                                    ZStack(alignment: .leading) {
-                                        WindowDragHandle()
-                                            .frame(maxWidth: .infinity, minHeight: 14, maxHeight: 14)
+                                    HStack(spacing: 0) {
                                         Rectangle()
                                             .fill(Color.white.opacity(0.38))
                                             .frame(width: 2, height: 14)
                                             .padding(.leading, 24)
-                                            .allowsHitTesting(false)
+                                        Spacer()
                                     }
                                 } else {
-                                    WindowDragHandle()
-                                        .frame(maxWidth: .infinity, minHeight: 12, maxHeight: 12)
+                                    Spacer()
+                                        .frame(height: 12)
                                 }
                             }
                         }
@@ -356,9 +354,8 @@ public struct FloatingPromptView: View {
                             }
                     }
                     .padding(.horizontal, 18)
-                    .padding(.top, 8)
+                    .padding(.top, 6)
                     .padding(.bottom, 14)
-                    .background(WindowDragHandle())
                 }
 
                 // Centered floating down-arrow button above the "Ask anything" bar when user scrolls up
@@ -439,8 +436,7 @@ public struct FloatingPromptView: View {
             VStack(alignment: .trailing, spacing: 6) {
                 if !message.attachedImages.isEmpty {
                     HStack(spacing: 8) {
-                        WindowDragHandle()
-                            .frame(minWidth: 60, maxWidth: .infinity, maxHeight: .infinity)
+                        Spacer(minLength: 60)
                         ForEach(message.attachedImages) { img in
                             if let data = Data(base64Encoded: img.base64Data),
                                let nsImg = NSImage(data: data) {
@@ -465,9 +461,8 @@ public struct FloatingPromptView: View {
                 }
 
                 if !message.content.isEmpty {
-                    HStack(spacing: 0) {
-                        WindowDragHandle()
-                            .frame(minWidth: 60, maxWidth: .infinity, maxHeight: .infinity)
+                    HStack {
+                        Spacer(minLength: 60)
                         Text(message.content)
                             .font(.system(size: 13.5, weight: .medium))
                             .foregroundStyle(.white)
@@ -933,7 +928,7 @@ public struct FloatingPromptView: View {
 
             // Empty space in the bottom bar acts as a drag handle to move the window
             WindowDragHandle()
-                .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if !viewModel.messages.isEmpty {
                 Button {
@@ -989,6 +984,7 @@ public struct FloatingPromptView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .frame(height: 38)
+        .background(WindowDragHandle())
     }
 
     // MARK: - Conversation History & Log Browser

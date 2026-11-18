@@ -142,7 +142,16 @@ public final class RoundedVisualEffectView: NSVisualEffectView {
     }
 
     public override var mouseDownCanMoveWindow: Bool {
+        return false
+    }
+
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         return true
+    }
+
+    public override func mouseDown(with event: NSEvent) {
+        guard let window = self.window else { return }
+        WindowDragHandle.DraggableNSView.runWindowDragLoop(for: window)
     }
 
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

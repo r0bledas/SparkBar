@@ -21,7 +21,7 @@ public final class FloatingPanel: NSPanel {
         self.level = .floating
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         self.animationBehavior = .none
-        self.isMovableByWindowBackground = true
+        self.isMovableByWindowBackground = false
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = true
@@ -102,6 +102,10 @@ public struct WindowDragHandle: NSViewRepresentable {
     public func updateNSView(_ nsView: DraggableNSView, context: Context) {}
 
     public final class DraggableNSView: NSView {
+        public override var mouseDownCanMoveWindow: Bool {
+            false
+        }
+
         public override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
             true
         }
@@ -120,9 +124,9 @@ public struct WindowDragHandle: NSViewRepresentable {
             let defaultOrigin = PanelController.shared.computeDefaultBottomAnchor()
             let magnetThreshold: CGFloat = 24.0
             let commandSnapThreshold: CGFloat = 64.0
-            var wasSnappedX = false
-            var wasSnappedY = false
-            var wasAtExactDefault = false
+            var wasSnappedX = (abs(initialWindowOrigin.x - defaultOrigin.x) < 1.0)
+            var wasSnappedY = (abs(initialWindowOrigin.y - defaultOrigin.y) < 1.0)
+            var wasAtExactDefault = wasSnappedX && wasSnappedY
 
             // Track mouse dragging & modifier flags in real time
             while let nextEvent = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .flagsChanged]) {
@@ -189,8 +193,10 @@ public struct WindowDragHandle: NSViewRepresentable {
                 wasAtExactDefault = isAtExactDefault
 
                 let newOrigin = NSPoint(x: round(proposedX), y: round(proposedY))
-                window.setFrameOrigin(newOrigin)
-                PanelController.shared.updateAnchoredBottomOrigin(newOrigin)
+                if window.frame.origin != newOrigin {
+                    window.setFrameOrigin(newOrigin)
+                    PanelController.shared.updateAnchoredBottomOrigin(newOrigin)
+                }
             }
         }
 
