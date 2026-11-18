@@ -57,6 +57,7 @@ public struct FloatingPromptView: View {
             if !viewModel.attachedImages.isEmpty {
                 attachedImagesPreviewBar
                     .frame(height: 64)
+                    .zIndex(999)
                 Divider()
                     .opacity(0.35)
             }
@@ -101,6 +102,47 @@ public struct FloatingPromptView: View {
                 .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.16), lineWidth: isDropTargeted ? 2 : 1)
                 .allowsHitTesting(false)
         )
+        .overlayPreferenceValue(HoveredImageTooltipAnchorKey.self) { item in
+            GeometryReader { geo in
+                if let item = item, !item.fileName.isEmpty {
+                    let thumbRect = geo[item.bounds]
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(item.fileName)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 240)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color(nsColor: .windowBackgroundColor))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.28), lineWidth: 0.75)
+                                    )
+                            )
+
+                        // Downward speech-bubble pointer triangle anchored over the center of the 44pt thumbnail (x = 17..27)
+                        SpeechBubblePointer()
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                            .frame(width: 10, height: 5)
+                            .overlay(
+                                SpeechBubblePointerStroke()
+                                    .stroke(Color.white.opacity(0.28), lineWidth: 0.75)
+                            )
+                            .padding(.leading, 17)
+                            .offset(y: -0.5)
+                    }
+                    .shadow(color: .black.opacity(0.5), radius: 6, x: 0, y: 2)
+                    .fixedSize()
+                    .offset(x: thumbRect.minX, y: thumbRect.minY - 34)
+                    .allowsHitTesting(false)
+                }
+            }
+        }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
@@ -1201,18 +1243,16 @@ public struct FloatingPromptView: View {
 
 /// Compact thumbnail-only preview for an attached image:
 /// - Instantly shows a top-right `×` remove badge on hover.
-/// - Pops up a comment-style speech bubble above the thumbnail stating the filename on hover.
+/// - Instantly pops up a comment-style speech bubble above the thumbnail stating the filename on hover, on the top layer.
 private struct AttachedImageThumbnailView: View {
     let image: AttachedImage
     let onRemove: () -> Void
 
     @State private var isHovered: Bool = false
-    @State private var showFileNameTooltip: Bool = false
-    @State private var hoverTask: Task<Void, Never>? = nil
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Thumbnail Preview (44 x 44)
+            // Thumbnail Preview (44 x 44) — static appearance with zero darkening or border animation on hover
             Group {
                 if let data = Data(base64Encoded: image.base64Data),
                    let nsImg = NSImage(data: data) {
@@ -1234,48 +1274,8 @@ private struct AttachedImageThumbnailView: View {
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Color.white.opacity(isHovered ? 0.35 : 0.16), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
             )
-            // Comment-like speech bubble popping up above the image preview with the file name
-            .overlay(alignment: .topLeading) {
-                if showFileNameTooltip, let name = image.fileName, !name.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(name)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 220)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                            .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.75)
-                                    )
-                            )
-
-                        // Downward speech-bubble pointer triangle anchored over the center of the 44pt thumbnail (x = 17..27)
-                        SpeechBubblePointer()
-                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
-                            .frame(width: 10, height: 5)
-                            .overlay(
-                                SpeechBubblePointerStroke()
-                                    .stroke(Color.white.opacity(0.22), lineWidth: 0.75)
-                            )
-                            .padding(.leading, 17)
-                            .offset(y: -0.5)
-                    }
-                    .shadow(color: .black.opacity(0.38), radius: 5, x: 0, y: 2)
-                    .fixedSize()
-                    .offset(y: -31)
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottomLeading)).combined(with: .offset(y: 4)))
-                }
-            }
 
             // Instant top-right 'X' remove button on hover
             if isHovered {
@@ -1290,26 +1290,35 @@ private struct AttachedImageThumbnailView: View {
                 }
                 .buttonStyle(.plain)
                 .offset(x: 5, y: -5)
+                .zIndex(10)
                 .accessibilityLabel("Remove attached image")
             }
         }
-        .zIndex(isHovered ? 100 : 0)
+        .anchorPreference(key: HoveredImageTooltipAnchorKey.self, value: .bounds) { anchor in
+            isHovered ? HoveredImageTooltipData(fileName: image.fileName ?? "", bounds: anchor) : nil
+        }
+        .zIndex(isHovered ? 999 : 0)
+        .animation(nil, value: isHovered)
         .onHover { hovering in
-            hoverTask?.cancel()
-            isHovered = hovering
-            if hovering {
-                hoverTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 250_000_000)
-                    guard !Task.isCancelled, isHovered else { return }
-                    withAnimation(.spring(response: 0.22, dampingFraction: 0.78)) {
-                        showFileNameTooltip = true
-                    }
-                }
-            } else {
-                withAnimation(.easeOut(duration: 0.12)) {
-                    showFileNameTooltip = false
-                }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isHovered = hovering
             }
+        }
+    }
+}
+
+private struct HoveredImageTooltipData {
+    let fileName: String
+    let bounds: Anchor<CGRect>
+}
+
+private struct HoveredImageTooltipAnchorKey: PreferenceKey {
+    static var defaultValue: HoveredImageTooltipData? = nil
+    static func reduce(value: inout HoveredImageTooltipData?, nextValue: () -> HoveredImageTooltipData?) {
+        if let next = nextValue() {
+            value = next
         }
     }
 }
