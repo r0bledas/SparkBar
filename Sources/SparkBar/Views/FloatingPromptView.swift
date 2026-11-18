@@ -10,6 +10,8 @@ public struct FloatingPromptView: View {
     @State private var expandedToolIds: Set<UUID> = []
     @State private var expandedReasoningIds: Set<UUID> = []
     @State private var copiedMessageId: UUID? = nil
+    @State private var copiedToolCommandId: UUID? = nil
+    @State private var copiedToolOutputId: UUID? = nil
     @State private var isUserScrolledUp: Bool = false
     @State private var scrollToBottomTrigger: Int = 0
     @State private var scrollWheelMonitor: Any? = nil
@@ -151,18 +153,19 @@ public struct FloatingPromptView: View {
     }
 
     private var promptInputBar: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 10) {
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16.5, weight: .regular))
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
+                .frame(width: PanelController.panelWidth - 16 - 36 - 34, alignment: .leading)
                 .clipped()
                 .focused($isInputFocused)
                 .onSubmit {
                     viewModel.sendCurrentPrompt()
                 }
                 .accessibilityLabel("Prompt Input")
+
+            Spacer(minLength: 0)
 
             if viewModel.isStreaming {
                 Button {
@@ -175,6 +178,7 @@ public struct FloatingPromptView: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
+                .layoutPriority(2)
                 .help("Stop generating")
                 .accessibilityLabel("Stop generating")
             } else {
@@ -190,6 +194,7 @@ public struct FloatingPromptView: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
+                .layoutPriority(2)
                 .disabled(!canSend)
                 .help("Send prompt (Return)")
                 .accessibilityLabel("Send prompt")
@@ -572,36 +577,125 @@ public struct FloatingPromptView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                ScrollView {
-                    Text(record.output)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(8)
+                let commandText = Self.formattedToolCommand(for: record)
+                VStack(alignment: .leading, spacing: 0) {
+                    // 1. Full Command / Arguments block with Copy button
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(record.toolName == "run_command" ? "Command" : "Arguments")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(commandText, forType: .string)
+                                copiedToolCommandId = record.id
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    if copiedToolCommandId == record.id { copiedToolCommandId = nil }
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: copiedToolCommandId == record.id ? "checkmark" : "doc.on.doc")
+                                        .font(.system(size: 9.5))
+                                    Text(copiedToolCommandId == record.id ? "Copied" : "Copy")
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(copiedToolCommandId == record.id ? Color.green : Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.top, 6)
+
+                        ScrollView {
+                            Text(commandText)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.primary.opacity(0.92))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 7)
+                        }
+                        .frame(maxHeight: 90)
+                    }
+                    .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 8))
+
+                    // 2. Connector line between Command and Output
+                    HStack(spacing: 0) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.38))
+                            .frame(width: 2, height: 12)
+                            .padding(.leading, 24)
+                        Spacer()
+                    }
+
+                    // 3. Output block with Copy button
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Output")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(record.output, forType: .string)
+                                copiedToolOutputId = record.id
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    if copiedToolOutputId == record.id { copiedToolOutputId = nil }
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: copiedToolOutputId == record.id ? "checkmark" : "doc.on.doc")
+                                        .font(.system(size: 9.5))
+                                    Text(copiedToolOutputId == record.id ? "Copied" : "Copy")
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                .foregroundStyle(copiedToolOutputId == record.id ? Color.green : Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.top, 6)
+
+                        ScrollView {
+                            Text(record.output.isEmpty ? "(no output)" : record.output)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 7)
+                        }
+                        .frame(maxHeight: 140)
+                    }
+                    .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
                 }
-                .frame(maxHeight: 140)
-                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
             }
         }
+    }
+
+    private static func formattedToolCommand(for record: ToolExecutionRecord) -> String {
+        if record.toolName == "run_command",
+           let data = record.arguments.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let cmd = obj["command"] as? String, !cmd.isEmpty {
+            return cmd
+        }
+        return record.arguments
     }
 
     // MARK: - Bottom Control & Model / Reasoning Effort Bar
 
     private var bottomControlBar: some View {
         HStack(spacing: 10) {
-            // Attachment icon on the left of the model selector (compact 1:1 square)
+            // Attachment icon on the left of the model selector (ultra-compact width)
             Button {
                 selectImageFromFilePicker()
             } label: {
                 Image(systemName: "paperclip")
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary : Color.accentColor)
-                    .frame(width: 22, height: 22)
-                    .background(
-                        (viewModel.attachedImages.isEmpty ? Color.clear : Color.accentColor.opacity(0.14)),
-                        in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    )
+                    .frame(width: 16, height: 18)
             }
             .buttonStyle(.plain)
             .fixedSize()
