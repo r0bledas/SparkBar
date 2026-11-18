@@ -243,8 +243,8 @@ public final class PanelController: NSObject, NSWindowDelegate {
         hostingView.layer?.cornerRadius = 16
         hostingView.layer?.masksToBounds = false
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
-        panel.contentView = hostingView
         self.panel = panel
+        panel.contentView = hostingView
     }
 
     public var isVisible: Bool {
@@ -295,15 +295,22 @@ public final class PanelController: NSObject, NSWindowDelegate {
             return Self.maxExpandedHeight
         }
         if !vm.attachedImages.isEmpty {
-            return Self.collapsedHeight + 40
+            return Self.collapsedHeight + 39
         }
         return Self.collapsedHeight
     }
 
     private func applyAnchoredFrame(height: CGFloat, animate: Bool) {
         guard let panel = panel else { return }
-        let anchor = anchoredBottomOrigin ?? computeDefaultBottomAnchor()
-        anchoredBottomOrigin = anchor
+        let anchor: NSPoint
+        if panel.isVisible, anchoredBottomOrigin != nil {
+            // Keep the bottom-left origin 100% stiff at the window's live bottom edge so it ONLY resizes upward
+            anchor = panel.frame.origin
+            anchoredBottomOrigin = anchor
+        } else {
+            anchor = anchoredBottomOrigin ?? computeDefaultBottomAnchor()
+            anchoredBottomOrigin = anchor
+        }
 
         let newFrame = NSRect(
             x: anchor.x,
@@ -313,8 +320,10 @@ public final class PanelController: NSObject, NSWindowDelegate {
         )
 
         isUpdatingFrame = true
-        panel.setFrame(newFrame, display: true, animate: animate)
         panel.contentView?.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: height)
+        panel.setFrame(newFrame, display: true, animate: animate)
+        panel.contentView?.needsLayout = true
+        panel.contentView?.layoutSubtreeIfNeeded()
         isUpdatingFrame = false
     }
 

@@ -73,6 +73,7 @@ public final class ChatViewModel: ObservableObject {
             localFilePath: localPath
         )
         attachedImages.append(item)
+        PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty || showHistory)
     }
 
     public func attachImage(from url: URL) {
@@ -90,6 +91,7 @@ public final class ChatViewModel: ObservableObject {
 
     public func removeAttachedImage(id: UUID) {
         attachedImages.removeAll { $0.id == id }
+        PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty || showHistory)
     }
 
     @discardableResult

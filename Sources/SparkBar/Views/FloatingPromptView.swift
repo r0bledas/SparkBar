@@ -43,6 +43,7 @@ public struct FloatingPromptView: View {
             // Attached images preview bar (if any)
             if !viewModel.attachedImages.isEmpty {
                 attachedImagesPreviewBar
+                    .frame(height: 38)
                 Divider()
                     .opacity(0.35)
             }
@@ -54,7 +55,7 @@ public struct FloatingPromptView: View {
             Divider()
                 .opacity(0.45)
 
-            // 3. Bottom Control Bar (Model | Reasoning Effort | Tools & Web | Clear & Settings)
+            // 3. Bottom Control Bar (Attachment | Model | Reasoning Effort | Tools & Web | Clear & Settings)
             bottomControlBar
                 .frame(height: 38)
         }
@@ -67,7 +68,7 @@ public struct FloatingPromptView: View {
                 .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.16), lineWidth: isDropTargeted ? 2 : 1)
         )
         .padding(8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
             handleDroppedItems(providers: providers)
         }
@@ -90,6 +91,9 @@ public struct FloatingPromptView: View {
                 isUserScrolledUp = false
             }
             PanelController.shared.syncPanelHeight(hasMessages: active)
+        }
+        .onChange(of: viewModel.attachedImages.count) { _, _ in
+            PanelController.shared.syncPanelHeight(hasMessages: hasActiveChatArea)
         }
         .onReceive(PanelController.shared.focusTrigger) { _ in
             isInputFocused = true
@@ -157,20 +161,8 @@ public struct FloatingPromptView: View {
         HStack(spacing: 11) {
             SparkBarLogoView(
                 size: 21,
-                isActive: viewModel.isStreaming || !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                isActive: viewModel.isStreaming || !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedImages.isEmpty
             )
-
-            // Photo attachment button
-            Button {
-                selectImageFromFilePicker()
-            } label: {
-                Image(systemName: "photo")
-                    .font(.system(size: 14))
-                    .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary.opacity(0.7) : Color.accentColor)
-            }
-            .buttonStyle(.plain)
-            .help("Attach an image (or paste with ⌘V)")
-            .accessibilityLabel("Attach image")
 
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
@@ -205,19 +197,18 @@ public struct FloatingPromptView: View {
                 .help("Stop generating")
                 .accessibilityLabel("Stop generating")
             } else {
+                let canSend = !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedImages.isEmpty
                 Button {
                     viewModel.sendCurrentPrompt()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(
-                            viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? Color.secondary.opacity(0.35)
-                                : Color.accentColor
+                            canSend ? Color.accentColor : Color.secondary.opacity(0.35)
                         )
                 }
                 .buttonStyle(.plain)
-                .disabled(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend)
                 .help("Send prompt (Return)")
                 .accessibilityLabel("Send prompt")
             }
@@ -600,6 +591,32 @@ public struct FloatingPromptView: View {
 
     private var bottomControlBar: some View {
         HStack(spacing: 10) {
+            // Attachment button on the left of the model selector
+            Button {
+                selectImageFromFilePicker()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 12, weight: .medium))
+                    if !viewModel.attachedImages.isEmpty {
+                        Text("\(viewModel.attachedImages.count)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    }
+                }
+                .fixedSize()
+                .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary : Color.accentColor)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(
+                    (viewModel.attachedImages.isEmpty ? Color.clear : Color.accentColor.opacity(0.14)),
+                    in: Capsule()
+                )
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help("Attach image or screenshot (or paste with ⌘V)")
+            .accessibilityLabel("Attach image")
+
             // Optional AI Provider Picker (Only shown if enabled in Settings)
             if settings.showProviderInMainBar {
                 Menu {

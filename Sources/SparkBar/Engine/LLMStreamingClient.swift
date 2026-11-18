@@ -285,10 +285,12 @@ public final class LLMStreamingClient {
             case .system:
                 apiMessages.append(["role": "system", "content": msg.content])
             case .user:
+                let lowerModel = model.lowercased()
+                let isTextOnlyDeepSeek = (provider == .deepseek && !lowerModel.contains("flash") && !lowerModel.contains("vl") && !lowerModel.contains("vision"))
                 if msg.attachedImages.isEmpty {
                     apiMessages.append(["role": "user", "content": msg.content])
-                } else if provider == .deepseek {
-                    // DeepSeek is text-only: enrich prompt with on-device Vision OCR + local file path
+                } else if isTextOnlyDeepSeek {
+                    // DeepSeek Pro / Reasoner is text-only: enrich prompt with on-device Vision OCR + local file path
                     var enriched = msg.content
                     for img in msg.attachedImages {
                         let ocr = VisionOCRHelper.recognizeText(from: img.base64Data)
@@ -304,7 +306,7 @@ public final class LLMStreamingClient {
                     }
                     apiMessages.append(["role": "user", "content": enriched])
                 } else {
-                    // Vision-enabled multimodal payload (OpenAI, OpenRouter, Gemini, Groq, Ollama)
+                    // Vision-enabled multimodal payload (DeepSeek Flash, OpenAI, OpenRouter, Gemini, Groq, Ollama)
                     var contentParts: [[String: Any]] = []
                     if !msg.content.isEmpty {
                         contentParts.append(["type": "text", "text": msg.content])
