@@ -28,6 +28,17 @@ public struct FloatingPromptView: View {
         VStack(spacing: 0) {
             // 1. Top Conversation / History Area (Appears above the prompt input when messages exist or History is toggled)
             if hasActiveChatArea {
+                // Dedicated top window drag bar so the user can always grab the top of the panel in chat/history mode
+                ZStack {
+                    WindowDragHandle()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Capsule()
+                        .fill(Color.primary.opacity(0.20))
+                        .frame(width: 36, height: 4)
+                        .allowsHitTesting(false)
+                }
+                .frame(height: 16)
+
                 if viewModel.showHistory {
                     historyBrowserArea
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -83,11 +94,12 @@ public struct FloatingPromptView: View {
         .frame(width: PanelController.panelWidth - 16)
         .background(
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, state: .active)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.16), lineWidth: isDropTargeted ? 2 : 1)
+                .allowsHitTesting(false)
         )
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -149,7 +161,9 @@ public struct FloatingPromptView: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
         }
+        .scrollClipDisabled()
         .frame(maxWidth: .infinity, alignment: .leading)
+        .zIndex(50)
     }
 
     private var promptInputBar: some View {
@@ -218,17 +232,6 @@ public struct FloatingPromptView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        // Subtle top drag handle indicator
-                        HStack {
-                            Spacer()
-                            Capsule()
-                                .fill(Color.primary.opacity(0.18))
-                                .frame(width: 36, height: 4)
-                                .padding(.top, 4)
-                                .padding(.bottom, 6)
-                            Spacer()
-                        }
-
                         let items = visibleMessages
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                             messageRow(for: msg)
@@ -238,16 +241,18 @@ public struct FloatingPromptView: View {
                                 let nextMsg = items[index + 1]
                                 if isBotChainItem(msg) && isBotChainItem(nextMsg) {
                                     // White vertical connector line aligned after 2x the corner-rounding inset (12pt * 2 = 24pt)
-                                    HStack(spacing: 0) {
+                                    ZStack(alignment: .leading) {
+                                        WindowDragHandle()
+                                            .frame(maxWidth: .infinity, minHeight: 14, maxHeight: 14)
                                         Rectangle()
                                             .fill(Color.white.opacity(0.38))
                                             .frame(width: 2, height: 14)
                                             .padding(.leading, 24)
-                                        Spacer()
+                                            .allowsHitTesting(false)
                                     }
                                 } else {
-                                    Spacer()
-                                        .frame(height: 12)
+                                    WindowDragHandle()
+                                        .frame(maxWidth: .infinity, minHeight: 12, maxHeight: 12)
                                 }
                             }
                         }
@@ -309,7 +314,9 @@ public struct FloatingPromptView: View {
                             }
                     }
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
+                    .padding(.top, 8)
+                    .padding(.bottom, 14)
+                    .background(WindowDragHandle())
                 }
 
                 // Centered floating down-arrow button above the "Ask anything" bar when user scrolls up
@@ -390,7 +397,8 @@ public struct FloatingPromptView: View {
             VStack(alignment: .trailing, spacing: 6) {
                 if !message.attachedImages.isEmpty {
                     HStack(spacing: 8) {
-                        Spacer(minLength: 60)
+                        WindowDragHandle()
+                            .frame(minWidth: 60, maxWidth: .infinity, maxHeight: .infinity)
                         ForEach(message.attachedImages) { img in
                             if let data = Data(base64Encoded: img.base64Data),
                                let nsImg = NSImage(data: data) {
@@ -415,8 +423,9 @@ public struct FloatingPromptView: View {
                 }
 
                 if !message.content.isEmpty {
-                    HStack {
-                        Spacer(minLength: 60)
+                    HStack(spacing: 0) {
+                        WindowDragHandle()
+                            .frame(minWidth: 60, maxWidth: .infinity, maxHeight: .infinity)
                         Text(message.content)
                             .font(.system(size: 13.5, weight: .medium))
                             .foregroundStyle(.white)
@@ -965,7 +974,8 @@ public struct FloatingPromptView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                Spacer()
+                WindowDragHandle()
+                    .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 24)
 
                 Button {
                     conversationStore.openLogsFolderInFinder()
@@ -1191,7 +1201,7 @@ public struct FloatingPromptView: View {
 
 /// Compact thumbnail-only preview for an attached image:
 /// - Instantly shows a top-right `×` remove badge on hover.
-/// - Displays the filename pill at the bottom after 0.5 seconds of continuous hover.
+/// - Pops up a comment-style speech bubble above the thumbnail stating the filename on hover.
 private struct AttachedImageThumbnailView: View {
     let image: AttachedImage
     let onRemove: () -> Void
@@ -1203,7 +1213,7 @@ private struct AttachedImageThumbnailView: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             // Thumbnail Preview (44 x 44)
-            ZStack(alignment: .bottom) {
+            Group {
                 if let data = Data(base64Encoded: image.base64Data),
                    let nsImg = NSImage(data: data) {
                     Image(nsImage: nsImg)
@@ -1221,33 +1231,51 @@ private struct AttachedImageThumbnailView: View {
                                 .foregroundStyle(.secondary)
                         )
                 }
-
-                // Delayed (0.5s) filename badge along the bottom of the thumbnail
-                if showFileNameTooltip, let name = image.fileName, !name.isEmpty {
-                    Text(name)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .frame(maxWidth: 44)
-                        .background(Color.black.opacity(0.75))
-                        .clipShape(
-                            .rect(
-                                topLeadingRadius: 0,
-                                bottomLeadingRadius: 9,
-                                bottomTrailingRadius: 9,
-                                topTrailingRadius: 0
-                            )
-                        )
-                        .transition(.opacity)
-                }
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(Color.white.opacity(isHovered ? 0.35 : 0.16), lineWidth: 1)
             )
+            // Comment-like speech bubble popping up above the image preview with the file name
+            .overlay(alignment: .topLeading) {
+                if showFileNameTooltip, let name = image.fileName, !name.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(name)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 220)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.75)
+                                    )
+                            )
+
+                        // Downward speech-bubble pointer triangle anchored over the center of the 44pt thumbnail (x = 17..27)
+                        SpeechBubblePointer()
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.95))
+                            .frame(width: 10, height: 5)
+                            .overlay(
+                                SpeechBubblePointerStroke()
+                                    .stroke(Color.white.opacity(0.22), lineWidth: 0.75)
+                            )
+                            .padding(.leading, 17)
+                            .offset(y: -0.5)
+                    }
+                    .shadow(color: .black.opacity(0.38), radius: 5, x: 0, y: 2)
+                    .fixedSize()
+                    .offset(y: -31)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottomLeading)).combined(with: .offset(y: 4)))
+                }
+            }
 
             // Instant top-right 'X' remove button on hover
             if isHovered {
@@ -1265,21 +1293,45 @@ private struct AttachedImageThumbnailView: View {
                 .accessibilityLabel("Remove attached image")
             }
         }
+        .zIndex(isHovered ? 100 : 0)
         .onHover { hovering in
             hoverTask?.cancel()
             isHovered = hovering
             if hovering {
                 hoverTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    try? await Task.sleep(nanoseconds: 250_000_000)
                     guard !Task.isCancelled, isHovered else { return }
-                    withAnimation(.easeInOut(duration: 0.12)) {
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.78)) {
                         showFileNameTooltip = true
                     }
                 }
             } else {
-                showFileNameTooltip = false
+                withAnimation(.easeOut(duration: 0.12)) {
+                    showFileNameTooltip = false
+                }
             }
         }
+    }
+}
+
+private struct SpeechBubblePointer: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct SpeechBubblePointerStroke: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
     }
 }
 

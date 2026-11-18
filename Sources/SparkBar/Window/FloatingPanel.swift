@@ -87,11 +87,11 @@ public final class FloatingPanel: NSPanel {
     }
 }
 
-/// Custom drag handle placed in the empty space of the bottom bar.
+/// Custom drag handle that also supports dragging the window from any empty/non-interactive area
+/// inside the chat scroll view or bottom bar.
 /// Supports:
-/// - Smooth window dragging
-/// - Holding `⌘ Command` while dragging to lock/align movement to the X or Y axis (or snap directly to the default X/Y axes)
-/// - Automatic magnetic snapping toward the default position (`defaultOrigin.x`, `defaultOrigin.y`, or both)
+/// - Smooth window dragging (with axis locking on `⌘ Command` and magnetic snapping to default origin)
+/// - Automatic window dragging when clicking & dragging on empty background areas of the panel
 public struct WindowDragHandle: NSViewRepresentable {
     public init() {}
 
@@ -102,20 +102,20 @@ public struct WindowDragHandle: NSViewRepresentable {
     public func updateNSView(_ nsView: DraggableNSView, context: Context) {}
 
     public final class DraggableNSView: NSView {
-        private var initialMouseLocation: NSPoint = .zero
-        private var initialWindowOrigin: NSPoint = .zero
-        private var lockedAxis: AxisLock? = nil
-
-        private enum AxisLock {
-            case horizontal // Y is locked, moves along X
-            case vertical   // X is locked, moves along Y
+        public override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
         }
 
         public override func mouseDown(with event: NSEvent) {
             guard let window = self.window else { return }
-            initialMouseLocation = NSEvent.mouseLocation
-            initialWindowOrigin = window.frame.origin
-            lockedAxis = nil
+            Self.runWindowDragLoop(for: window)
+        }
+
+        @MainActor
+        public static func runWindowDragLoop(for window: NSWindow) {
+            let initialMouseLocation = NSEvent.mouseLocation
+            let initialWindowOrigin = window.frame.origin
+            var lockedAxis: AxisLock? = nil
 
             let defaultOrigin = PanelController.shared.computeDefaultBottomAnchor()
             let magnetThreshold: CGFloat = 24.0
@@ -192,6 +192,11 @@ public struct WindowDragHandle: NSViewRepresentable {
                 window.setFrameOrigin(newOrigin)
                 PanelController.shared.updateAnchoredBottomOrigin(newOrigin)
             }
+        }
+
+        private enum AxisLock {
+            case horizontal // Y is locked, moves along X
+            case vertical   // X is locked, moves along Y
         }
     }
 }
@@ -345,7 +350,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
             return Self.maxExpandedHeight
         }
         if !vm.attachedImages.isEmpty {
-            return Self.collapsedHeight + 65
+            return Self.collapsedHeight + 98
         }
         return Self.collapsedHeight
     }
