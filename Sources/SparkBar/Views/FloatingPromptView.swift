@@ -590,18 +590,17 @@ public struct FloatingPromptView: View {
 
     private var bottomControlBar: some View {
         HStack(spacing: 10) {
-            // Attachment icon on the left of the model selector (compact width, icon only)
+            // Attachment icon on the left of the model selector (compact 1:1 square)
             Button {
                 selectImageFromFilePicker()
             } label: {
                 Image(systemName: "paperclip")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary : Color.accentColor)
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 3)
+                    .frame(width: 22, height: 22)
                     .background(
                         (viewModel.attachedImages.isEmpty ? Color.clear : Color.accentColor.opacity(0.14)),
-                        in: Capsule()
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                     )
             }
             .buttonStyle(.plain)
