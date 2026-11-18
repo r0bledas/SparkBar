@@ -9,7 +9,12 @@ public final class ChatViewModel: ObservableObject {
     @Published public var currentSessionId: UUID = UUID()
     @Published public var messages: [ChatMessage] = []
     @Published public var attachedImages: [AttachedImage] = []
-    @Published public var inputText: String = ""
+    @Published public var inputText: String = "" {
+        didSet {
+            guard !isSanitizingInput else { return }
+            sanitizeDroppedImagePathsInInputText()
+        }
+    }
     @Published public var isStreaming: Bool = false
     @Published public var activeToolStatus: String? = nil
     @Published public var errorMessage: String? = nil
@@ -18,8 +23,39 @@ public final class ChatViewModel: ObservableObject {
 
     private let client = LLMStreamingClient()
     private var currentTask: Task<Void, Never>?
+    private var isSanitizingInput: Bool = false
 
     public init() {}
+
+    /// Detects if macOS dropped a screenshot/image path (like `/var/folders/.../NSIRD_screencaptureui_.../Screenshot...png`)
+    /// into `inputText`, attaches the image, and strips the path from the text box.
+    private func sanitizeDroppedImagePathsInInputText() {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("/var/folders/") || trimmed.hasPrefix("/") else { return }
+
+        let unescaped = trimmed
+            .replacingOccurrences(of: "\\ ", with: " ")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+        let ext = (unescaped as NSString).pathExtension.lowercased()
+        let imageExts: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"]
+
+        if imageExts.contains(ext), FileManager.default.fileExists(atPath: unescaped) {
+            isSanitizingInput = true
+            inputText = ""
+            isSanitizingInput = false
+            attachImage(from: URL(fileURLWithPath: unescaped))
+        } else if unescaped.contains("screencaptureui") {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: unescaped, isDirectory: &isDir), isDir.boolValue,
+               let items = try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: unescaped), includingPropertiesForKeys: nil),
+               let firstImg = items.first(where: { imageExts.contains($0.pathExtension.lowercased()) }) {
+                isSanitizingInput = true
+                inputText = ""
+                isSanitizingInput = false
+                attachImage(from: firstImg)
+            }
+        }
+    }
 
     public func sendCurrentPrompt() {
         let prompt = inputText.trimmingCharacters(in: .whitespacesAndNewlines)

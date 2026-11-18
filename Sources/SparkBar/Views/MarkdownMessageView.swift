@@ -282,17 +282,12 @@ public struct MarkdownMessageView: View {
     }
 
     public var body: some View {
-        let blocks = Self.parseBlocks(from: text)
+        let groupedBlocks = Self.coalesceSelectableTextBlocks(Self.parseBlocks(from: text))
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(blocks) { block in
+            ForEach(groupedBlocks) { block in
                 switch block {
                 case .text(_, let content):
-                    ForEach(Array(content.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
-                        let trimmed = paragraph.trimmingCharacters(in: .newlines)
-                        if !trimmed.isEmpty {
-                            renderedParagraph(trimmed)
-                        }
-                    }
+                    renderedMultiParagraphText(content)
 
                 case .heading(_, let level, let title):
                     renderedHeading(level: level, title: title)
@@ -408,65 +403,60 @@ public struct MarkdownMessageView: View {
     private func renderedMarkdownTable(headers: [String], rows: [[String]]) -> some View {
         let colCount = max(headers.count, rows.map(\.count).max() ?? 0)
         if colCount > 0 {
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Header Row
-                    if !headers.isEmpty {
-                        HStack(spacing: 0) {
-                            ForEach(0..<colCount, id: \.self) { colIdx in
-                                let cellText = colIdx < headers.count ? headers[colIdx] : ""
-                                inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .semibold))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .frame(minWidth: 110, maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 0) {
+                // Header Row (uniform surface, bold text, crisp bottom divider — no lighter fill getting rounded on edges)
+                if !headers.isEmpty {
+                    HStack(spacing: 0) {
+                        ForEach(0..<colCount, id: \.self) { colIdx in
+                            let cellText = colIdx < headers.count ? headers[colIdx] : ""
+                            inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
-                                if colIdx < colCount - 1 {
-                                    Rectangle()
-                                        .fill(Color.primary.opacity(0.14))
-                                        .frame(width: 1)
-                                }
+                            if colIdx < colCount - 1 {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.14))
+                                    .frame(width: 1)
                             }
                         }
-                        .background(Color.primary.opacity(0.08))
+                    }
 
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.22))
+                        .frame(height: 1.5)
+                }
+
+                // Data Rows (clean uniform background, sharp grid lines, zero rounded column fills)
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                    HStack(spacing: 0) {
+                        ForEach(0..<colCount, id: \.self) { colIdx in
+                            let cellText = colIdx < row.count ? row[colIdx] : ""
+                            inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .regular))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if colIdx < colCount - 1 {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.12))
+                                    .frame(width: 1)
+                            }
+                        }
+                    }
+
+                    if rowIdx < rows.count - 1 {
                         Rectangle()
-                            .fill(Color.primary.opacity(0.18))
+                            .fill(Color.primary.opacity(0.12))
                             .frame(height: 1)
                     }
-
-                    // Data Rows with clean horizontal & vertical separators
-                    ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
-                        HStack(spacing: 0) {
-                            ForEach(0..<colCount, id: \.self) { colIdx in
-                                let cellText = colIdx < row.count ? row[colIdx] : ""
-                                inlineMarkdownText(cellText, font: .system(size: 12.5, weight: .regular))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .frame(minWidth: 110, maxWidth: .infinity, alignment: .leading)
-
-                                if colIdx < colCount - 1 {
-                                    Rectangle()
-                                        .fill(Color.primary.opacity(0.10))
-                                        .frame(width: 1)
-                                }
-                            }
-                        }
-                        .background(rowIdx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.035))
-
-                        if rowIdx < rows.count - 1 {
-                            Rectangle()
-                                .fill(Color.primary.opacity(0.12))
-                                .frame(height: 1)
-                        }
-                    }
                 }
-                .background(Color.black.opacity(0.18))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
-                )
             }
+            .background(Color.black.opacity(0.20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+            )
             .textSelection(.enabled)
         }
     }
@@ -490,25 +480,81 @@ public struct MarkdownMessageView: View {
         }
     }
 
+    /// Renders an entire multi-line / multi-paragraph text section (including across `.` + `Enter`, bullet lists, and headings)
+    /// inside a SINGLE unified `Text(AttributedString)` view so the user can drag-select across newlines and paragraphs without hitting boundaries.
     @ViewBuilder
-    private func renderedParagraph(_ paragraph: String) -> some View {
-        let processed = Self.convertInlineLaTeXInText(paragraph)
-        if let attributed = try? AttributedString(
-            markdown: processed,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            Text(attributed)
-                .font(.system(size: 14, weight: .regular))
-                .lineSpacing(3)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-        } else {
-            Text(processed)
-                .font(.system(size: 14, weight: .regular))
-                .lineSpacing(3)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
+    private func renderedMultiParagraphText(_ rawContent: String) -> some View {
+        let unified = Self.buildUnifiedAttributedString(from: rawContent)
+        Text(unified)
+            .font(.system(size: 14, weight: .regular))
+            .lineSpacing(3)
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+    }
+
+    private static func coalesceSelectableTextBlocks(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+        var result: [MarkdownBlock] = []
+        var textAccumulator: [String] = []
+        var currentId: Int = 0
+
+        func flushText() {
+            guard !textAccumulator.isEmpty else { return }
+            result.append(.text(id: currentId, content: textAccumulator.joined(separator: "\n\n")))
+            textAccumulator.removeAll()
         }
+
+        for block in blocks {
+            switch block {
+            case .text(let id, let content):
+                if textAccumulator.isEmpty { currentId = id }
+                textAccumulator.append(content)
+            case .heading(let id, let level, let title):
+                if textAccumulator.isEmpty { currentId = id }
+                let hashes = String(repeating: "#", count: level)
+                textAccumulator.append("\(hashes) \(title)")
+            default:
+                flushText()
+                result.append(block)
+            }
+        }
+        flushText()
+        return result
+    }
+
+    private static func buildUnifiedAttributedString(from content: String) -> AttributedString {
+        let processed = convertInlineLaTeXInText(content)
+        let lines = processed.components(separatedBy: "\n")
+        var result = AttributedString()
+
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            var lineAttr: AttributedString
+            if let (level, title) = parseHeadingLine(trimmed) {
+                let size: CGFloat = switch level {
+                case 1: 18
+                case 2: 16
+                case 3: 14.5
+                default: 13.5
+                }
+                lineAttr = (try? AttributedString(
+                    markdown: title,
+                    options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                )) ?? AttributedString(title)
+                lineAttr.font = .system(size: size, weight: .bold)
+            } else {
+                lineAttr = (try? AttributedString(
+                    markdown: line,
+                    options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                )) ?? AttributedString(line)
+            }
+
+            result.append(lineAttr)
+            if index < lines.count - 1 {
+                result.append(AttributedString("\n"))
+            }
+        }
+        return result
     }
 
     // MARK: - LaTeX to Unicode Mathematical Formatter

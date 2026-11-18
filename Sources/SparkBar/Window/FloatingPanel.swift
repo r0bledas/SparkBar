@@ -215,6 +215,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
     private var globalMouseMonitor: Any?
     private var outsideMouseDownPoint: NSPoint?
     private var didDragOutside: Bool = false
+    private let fieldEditor = SparkBarFieldEditor()
 
     private override init() {
         super.init()
@@ -401,5 +402,103 @@ public final class PanelController: NSObject, NSWindowDelegate {
     public func windowDidResignKey(_ notification: Notification) {
         // Dismissal on outside click is handled on mouse-up in `setupOutsideClickMonitor()`
         // so that dragging files from Finder/Safari or clicking macOS TCC permission dialogs never hides the window.
+    }
+
+    public func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        fieldEditor.isFieldEditor = true
+        return fieldEditor
+    }
+}
+
+/// Custom field editor for the prompt `TextField` that intercepts dragged screenshots and image files
+/// (such as macOS bottom-right screenshot previews from `/var/folders/.../NSIRD_screencaptureui_...`)
+/// and attaches them as images instead of pasting their file path into the text box.
+public final class SparkBarFieldEditor: NSTextView {
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if Self.canHandleImageDrag(sender.draggingPasteboard) {
+            return .copy
+        }
+        return super.draggingEntered(sender)
+    }
+
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if Self.canHandleImageDrag(sender.draggingPasteboard) {
+            return .copy
+        }
+        return super.draggingUpdated(sender)
+    }
+
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if Self.extractAndAttachImages(from: sender.draggingPasteboard) {
+            return true
+        }
+        return super.performDragOperation(sender)
+    }
+
+    public override func paste(_ sender: Any?) {
+        if ChatViewModel.shared.checkAndAttachPasteboardImage() {
+            return
+        }
+        super.paste(sender)
+    }
+
+    public static func canHandleImageDrag(_ pb: NSPasteboard) -> Bool {
+        if pb.data(forType: .png) != nil || pb.data(forType: .tiff) != nil {
+            return true
+        }
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext) || url.path.contains("screencaptureui") {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    @MainActor
+    public static func extractAndAttachImages(from pb: NSPasteboard) -> Bool {
+        var attached = false
+
+        // 1. Check file URLs first (including macOS screencaptureui temp files in /var/folders/...)
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext),
+                   FileManager.default.fileExists(atPath: url.path) {
+                    ChatViewModel.shared.attachImage(from: url)
+                    attached = true
+                } else if url.path.contains("screencaptureui") {
+                    // If macOS gave the temp folder path, find any image file inside it
+                    if let items = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) {
+                        for item in items where ["png", "jpg", "jpeg", "tiff", "heic"].contains(item.pathExtension.lowercased()) {
+                            ChatViewModel.shared.attachImage(from: item)
+                            attached = true
+                        }
+                    }
+                }
+            }
+            if attached {
+                PanelController.shared.showPanel()
+                return true
+            }
+        }
+
+        // 2. Check raw PNG / TIFF bitmap data on the dragging pasteboard (used by macOS bottom-right screenshot preview before file flush)
+        if let pngData = pb.data(forType: .png) {
+            ChatViewModel.shared.attachImage(data: pngData, mimeType: "image/png", fileName: "Screenshot.png")
+            PanelController.shared.showPanel()
+            return true
+        }
+        if let tiffData = pb.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: tiffData),
+           let png = rep.representation(using: .png, properties: [:]) {
+            ChatViewModel.shared.attachImage(data: png, mimeType: "image/png", fileName: "Screenshot.png")
+            PanelController.shared.showPanel()
+            return true
+        }
+
+        return false
     }
 }
