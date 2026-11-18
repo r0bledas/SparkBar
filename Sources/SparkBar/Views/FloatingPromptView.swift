@@ -43,7 +43,7 @@ public struct FloatingPromptView: View {
             // Attached images preview bar (if any)
             if !viewModel.attachedImages.isEmpty {
                 attachedImagesPreviewBar
-                    .frame(height: 38)
+                    .frame(height: 64)
                 Divider()
                     .opacity(0.35)
             }
@@ -55,10 +55,11 @@ public struct FloatingPromptView: View {
             Divider()
                 .opacity(0.45)
 
-            // 3. Bottom Control Bar (Attachment | Model | Reasoning Effort | Tools & Web | Clear & Settings)
+            // 3. Bottom Control Bar (Attachment | Model | Reasoning Effort | Tools | Clear & Settings)
             bottomControlBar
                 .frame(height: 38)
         }
+        .frame(width: PanelController.panelWidth - 16)
         .background(
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, state: .active)
         )
@@ -117,44 +118,17 @@ public struct FloatingPromptView: View {
 
     private var attachedImagesPreviewBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ForEach(viewModel.attachedImages) { img in
-                    HStack(spacing: 6) {
-                        if let data = Data(base64Encoded: img.base64Data),
-                           let nsImg = NSImage(data: data) {
-                            Image(nsImage: nsImg)
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(width: 26, height: 26)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        Text(img.fileName ?? "Image")
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                            .frame(maxWidth: 130, alignment: .leading)
-                        Button {
-                            viewModel.removeAttachedImage(id: img.id)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Remove image")
+                    AttachedImageThumbnailView(image: img) {
+                        viewModel.removeAttachedImage(id: img.id)
                     }
-                    .padding(.leading, 4)
-                    .padding(.trailing, 6)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-                    )
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 6)
+            .padding(.vertical, 10)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var promptInputBar: some View {
@@ -591,31 +565,29 @@ public struct FloatingPromptView: View {
 
     private var bottomControlBar: some View {
         HStack(spacing: 10) {
-            // Attachment button on the left of the model selector
+            // Attachment icon on the left of the model selector (icon only, no counter)
             Button {
                 selectImageFromFilePicker()
             } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 12, weight: .medium))
-                    if !viewModel.attachedImages.isEmpty {
-                        Text("\(viewModel.attachedImages.count)")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    }
-                }
-                .fixedSize()
-                .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary : Color.accentColor)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 3)
-                .background(
-                    (viewModel.attachedImages.isEmpty ? Color.clear : Color.accentColor.opacity(0.14)),
-                    in: Capsule()
-                )
+                Image(systemName: "paperclip")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary : Color.accentColor)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 3)
+                    .background(
+                        (viewModel.attachedImages.isEmpty ? Color.clear : Color.accentColor.opacity(0.14)),
+                        in: Capsule()
+                    )
             }
             .buttonStyle(.plain)
             .fixedSize()
             .help("Attach image or screenshot (or paste with ⌘V)")
             .accessibilityLabel("Attach image")
+
+            // Separator between Attachment icon and Model selector
+            Divider()
+                .frame(height: 13)
+                .opacity(0.6)
 
             // Optional AI Provider Picker (Only shown if enabled in Settings)
             if settings.showProviderInMainBar {
@@ -746,58 +718,30 @@ public struct FloatingPromptView: View {
                 .help("Select Thinking Effort")
             }
 
-            // Visual Separator before the Tools & Web group
+            // Visual Separator before the consolidated Tools icon
             Divider()
                 .frame(height: 13)
                 .opacity(0.6)
 
-            // Tools & Web grouped together without a separator between them (fixedSize so they never wrap vertically)
-            HStack(spacing: 6) {
-                Button {
-                    settings.enableTools.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
-                            .font(.system(size: 10.5))
-                        Text("Tools")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .fixedSize()
+            // Single consolidated Tools icon button (controls Tools + Web Search together)
+            Button {
+                settings.enableTools.toggle()
+                settings.enableWebSearchTool = settings.enableTools
+            } label: {
+                Image(systemName: settings.enableTools ? "hammer.fill" : "hammer")
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(settings.enableTools ? Color.accentColor : Color.secondary)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .background(
                         (settings.enableTools ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05)),
                         in: Capsule()
                     )
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .help("Toggle autonomous tools (Web Search, Terminal, File I/O)")
-
-                Button {
-                    settings.enableWebSearchTool.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 10.5))
-                        Text("Web")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .fixedSize()
-                    .foregroundStyle(settings.enableWebSearchTool ? Color.blue : Color.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        (settings.enableWebSearchTool ? Color.blue.opacity(0.14) : Color.primary.opacity(0.05)),
-                        in: Capsule()
-                    )
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .help("Toggle live web search")
             }
+            .buttonStyle(.plain)
             .fixedSize()
+            .help("Toggle autonomous tools & web search")
+            .accessibilityLabel("Toggle Tools")
 
             // Empty space in the bottom bar acts as a drag handle to move the window
             WindowDragHandle()
@@ -825,22 +769,15 @@ public struct FloatingPromptView: View {
             Button {
                 viewModel.toggleHistory()
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 11.5, weight: .medium))
-                    if !conversationStore.sessions.isEmpty {
-                        Text("\(conversationStore.sessions.count)")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    }
-                }
-                .fixedSize()
-                .foregroundStyle(viewModel.showHistory ? Color.accentColor : Color.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    (viewModel.showHistory ? Color.accentColor.opacity(0.16) : Color.clear),
-                    in: Capsule()
-                )
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(viewModel.showHistory ? Color.accentColor : Color.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 3)
+                    .background(
+                        (viewModel.showHistory ? Color.accentColor.opacity(0.16) : Color.clear),
+                        in: Capsule()
+                    )
             }
             .buttonStyle(.plain)
             .fixedSize()
@@ -1072,10 +1009,15 @@ public struct FloatingPromptView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.image, .png, .jpeg, .webP, .gif, .tiff]
+        viewModel.isPickingFile = true
         panel.begin { response in
-            guard response == .OK else { return }
-            for url in panel.urls {
-                viewModel.attachImage(from: url)
+            Task { @MainActor in
+                viewModel.isPickingFile = false
+                guard response == .OK else { return }
+                for url in panel.urls {
+                    viewModel.attachImage(from: url)
+                }
+                PanelController.shared.showPanel()
             }
         }
     }
@@ -1090,6 +1032,7 @@ public struct FloatingPromptView: View {
                     if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext) {
                         DispatchQueue.main.async {
                             viewModel.attachImage(from: url)
+                            PanelController.shared.showPanel()
                         }
                     }
                 }
@@ -1099,11 +1042,106 @@ public struct FloatingPromptView: View {
                     guard let data = data else { return }
                     DispatchQueue.main.async {
                         viewModel.attachImage(data: data, mimeType: "image/png", fileName: "Dropped_Image.png")
+                        PanelController.shared.showPanel()
                     }
                 }
                 handled = true
             }
         }
         return handled
+    }
+}
+
+/// Compact thumbnail-only preview for an attached image:
+/// - Instantly shows a top-right `×` remove badge on hover.
+/// - Displays the filename pill at the bottom after 0.5 seconds of continuous hover.
+private struct AttachedImageThumbnailView: View {
+    let image: AttachedImage
+    let onRemove: () -> Void
+
+    @State private var isHovered: Bool = false
+    @State private var showFileNameTooltip: Bool = false
+    @State private var hoverTask: Task<Void, Never>? = nil
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            // Thumbnail Preview (44 x 44)
+            ZStack(alignment: .bottom) {
+                if let data = Data(base64Encoded: image.base64Data),
+                   let nsImg = NSImage(data: data) {
+                    Image(nsImage: nsImg)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.system(size: 16))
+                                .foregroundStyle(.secondary)
+                        )
+                }
+
+                // Delayed (0.5s) filename badge along the bottom of the thumbnail
+                if showFileNameTooltip, let name = image.fileName, !name.isEmpty {
+                    Text(name)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .frame(maxWidth: 44)
+                        .background(Color.black.opacity(0.75))
+                        .clipShape(
+                            .rect(
+                                topLeadingRadius: 0,
+                                bottomLeadingRadius: 9,
+                                bottomTrailingRadius: 9,
+                                topTrailingRadius: 0
+                            )
+                        )
+                        .transition(.opacity)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.white.opacity(isHovered ? 0.35 : 0.16), lineWidth: 1)
+            )
+
+            // Instant top-right 'X' remove button on hover
+            if isHovered {
+                Button {
+                    onRemove()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, Color.black.opacity(0.82))
+                        .font(.system(size: 15))
+                        .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 5, y: -5)
+                .accessibilityLabel("Remove attached image")
+            }
+        }
+        .onHover { hovering in
+            hoverTask?.cancel()
+            isHovered = hovering
+            if hovering {
+                hoverTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled, isHovered else { return }
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        showFileNameTooltip = true
+                    }
+                }
+            } else {
+                showFileNameTooltip = false
+            }
+        }
     }
 }

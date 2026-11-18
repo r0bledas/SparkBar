@@ -126,20 +126,86 @@ public struct MathBlockContainerView: View {
 public final class RoundedVisualEffectView: NSVisualEffectView {
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        self.wantsLayer = true
-        self.layer?.cornerRadius = 16
-        self.layer?.masksToBounds = true
+        setupView()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        setupView()
+    }
+
+    private func setupView() {
         self.wantsLayer = true
         self.layer?.cornerRadius = 16
         self.layer?.masksToBounds = true
+        registerForDraggedTypes([.fileURL, .png, .tiff])
     }
 
     public override var mouseDownCanMoveWindow: Bool {
         return true
+    }
+
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return canAcceptDrag(sender) ? .copy : []
+    }
+
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        return canAcceptDrag(sender) ? .copy : []
+    }
+
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+        var attached = false
+
+        // 1. Check dragged file URLs first (so Finder files read actual image bytes, never the Finder .icns icon)
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext) {
+                    Task { @MainActor in
+                        ChatViewModel.shared.attachImage(from: url)
+                        PanelController.shared.showPanel()
+                    }
+                    attached = true
+                }
+            }
+            if attached { return true }
+        }
+
+        // 2. Direct bitmap data dragged from browsers/Preview
+        if let pngData = pb.data(forType: .png) {
+            Task { @MainActor in
+                ChatViewModel.shared.attachImage(data: pngData, mimeType: "image/png", fileName: "Dropped_Image.png")
+                PanelController.shared.showPanel()
+            }
+            return true
+        }
+        if let tiffData = pb.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: tiffData),
+           let png = rep.representation(using: .png, properties: [:]) {
+            Task { @MainActor in
+                ChatViewModel.shared.attachImage(data: png, mimeType: "image/png", fileName: "Dropped_Image.png")
+                PanelController.shared.showPanel()
+            }
+            return true
+        }
+        return false
+    }
+
+    private func canAcceptDrag(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext) {
+                    return true
+                }
+            }
+        }
+        if pb.data(forType: .png) != nil || pb.data(forType: .tiff) != nil {
+            return true
+        }
+        return false
     }
 }
 

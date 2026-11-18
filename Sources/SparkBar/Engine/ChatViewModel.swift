@@ -94,17 +94,13 @@ public final class ChatViewModel: ObservableObject {
         PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty || showHistory)
     }
 
+    @Published public var isPickingFile: Bool = false
+
     @discardableResult
     public func checkAndAttachPasteboardImage() -> Bool {
         let pb = NSPasteboard.general
-        if let image = NSImage(pasteboard: pb),
-           let tiff = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiff),
-           let png = rep.representation(using: .png, properties: [:]) {
-            attachImage(data: png, mimeType: "image/png", fileName: "Pasted_Screenshot.png")
-            return true
-        }
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+        // 1. Check copied file URLs FIRST (so copying an image file in Finder reads the actual image bytes, NOT the Finder .icns file icon!)
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
             var found = false
             for url in urls {
                 let ext = url.pathExtension.lowercased()
@@ -114,6 +110,17 @@ public final class ChatViewModel: ObservableObject {
                 }
             }
             if found { return true }
+        }
+        // 2. Direct bitmap data from screenshots or "Copy Image" in browsers/Preview
+        if let pngData = pb.data(forType: .png) {
+            attachImage(data: pngData, mimeType: "image/png", fileName: "Screenshot.png")
+            return true
+        }
+        if let tiffData = pb.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: tiffData),
+           let png = rep.representation(using: .png, properties: [:]) {
+            attachImage(data: png, mimeType: "image/png", fileName: "Screenshot.png")
+            return true
         }
         return false
     }

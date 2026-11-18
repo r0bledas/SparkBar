@@ -17,6 +17,7 @@ public final class FloatingPanel: NSPanel {
         )
 
         self.isFloatingPanel = true
+        self.hidesOnDeactivate = false
         self.level = .floating
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         self.animationBehavior = .none
@@ -200,7 +201,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
     public static let shared = PanelController()
 
     public static let panelWidth: CGFloat = 520
-    public static let collapsedHeight: CGFloat = 110
+    public static let collapsedHeight: CGFloat = 105
     /// Once active with messages, the window is a 1:1 square (520 x 520)
     public static let maxExpandedHeight: CGFloat = 520
 
@@ -211,6 +212,9 @@ public final class PanelController: NSObject, NSWindowDelegate {
     /// without ever jumping up or down when sending a message or starting a new chat.
     private var anchoredBottomOrigin: NSPoint?
     private var isUpdatingFrame: Bool = false
+    private var globalMouseMonitor: Any?
+    private var outsideMouseDownPoint: NSPoint?
+    private var didDragOutside: Bool = false
 
     private override init() {
         super.init()
@@ -245,6 +249,51 @@ public final class PanelController: NSObject, NSWindowDelegate {
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         self.panel = panel
         panel.contentView = hostingView
+        setupOutsideClickMonitor()
+    }
+
+    private func setupOutsideClickMonitor() {
+        guard globalMouseMonitor == nil else { return }
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseDown, .rightMouseUp]
+        ) { [weak self] event in
+            Task { @MainActor [weak self] in
+                guard let self = self, let panel = self.panel, panel.isVisible else { return }
+                let mouseLoc = NSEvent.mouseLocation
+                switch event.type {
+                case .leftMouseDown, .rightMouseDown:
+                    self.outsideMouseDownPoint = mouseLoc
+                    self.didDragOutside = false
+                case .leftMouseDragged:
+                    if let start = self.outsideMouseDownPoint {
+                        let dist = hypot(mouseLoc.x - start.x, mouseLoc.y - start.y)
+                        if dist > 4 {
+                            self.didDragOutside = true
+                        }
+                    } else {
+                        self.didDragOutside = true
+                    }
+                case .leftMouseUp, .rightMouseUp:
+                    defer {
+                        self.outsideMouseDownPoint = nil
+                        self.didDragOutside = false
+                    }
+                    // Never hide if the user was dragging (e.g. dragging an image into SparkBar)
+                    if self.didDragOutside { return }
+                    let vm = ChatViewModel.shared
+                    // Never hide while streaming/running tools (e.g. when macOS pops up a folder permission dialog),
+                    // or when settings / file picker are open, or when pinned
+                    if SettingsStore.shared.pinWindowOnBlur || vm.showSettings || vm.isPickingFile || vm.isStreaming || vm.activeToolStatus != nil {
+                        return
+                    }
+                    if !NSMouseInRect(mouseLoc, panel.frame, false) {
+                        self.hidePanel()
+                    }
+                default:
+                    break
+                }
+            }
+        }
     }
 
     public var isVisible: Bool {
@@ -295,7 +344,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
             return Self.maxExpandedHeight
         }
         if !vm.attachedImages.isEmpty {
-            return Self.collapsedHeight + 39
+            return Self.collapsedHeight + 65
         }
         return Self.collapsedHeight
     }
@@ -350,8 +399,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
     }
 
     public func windowDidResignKey(_ notification: Notification) {
-        if !SettingsStore.shared.pinWindowOnBlur && !ChatViewModel.shared.showSettings {
-            hidePanel()
-        }
+        // Dismissal on outside click is handled on mouse-up in `setupOutsideClickMonitor()`
+        // so that dragging files from Finder/Safari or clicking macOS TCC permission dialogs never hides the window.
     }
 }
