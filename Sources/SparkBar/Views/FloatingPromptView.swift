@@ -141,6 +141,8 @@ public struct FloatingPromptView: View {
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16.5, weight: .regular))
+                .frame(maxWidth: .infinity)
+                .padding(.trailing, 4)
                 .focused($isInputFocused)
                 .onSubmit {
                     viewModel.sendCurrentPrompt()
@@ -156,6 +158,7 @@ public struct FloatingPromptView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .fixedSize()
                 .accessibilityLabel("Clear input text")
             }
 
@@ -329,6 +332,10 @@ public struct FloatingPromptView: View {
                     proxy.scrollTo("stream_bottom_anchor", anchor: .bottom)
                 }
             }
+            .onReceive(viewModel.scrollToMessageTrigger) { targetId in
+                isUserScrolledUp = false
+                proxy.scrollTo(targetId, anchor: .top)
+            }
         }
     }
 
@@ -354,7 +361,7 @@ public struct FloatingPromptView: View {
                 let isLastStreaming = viewModel.isStreaming && index == all.count - 1 && viewModel.activeToolStatus == nil
                 return (hasText || hasReasoning || isLastStreaming) ? msg : nil
             case .system:
-                return nil
+                return msg.content.hasPrefix("Switched to:") ? msg : nil
             }
         }
     }
@@ -502,7 +509,20 @@ public struct FloatingPromptView: View {
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
         case .system:
-            EmptyView()
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.18))
+                    .frame(height: 1)
+                Text(message.content)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Rectangle()
+                    .fill(Color.primary.opacity(0.18))
+                    .frame(height: 1)
+            }
+            .padding(.vertical, 4)
         }
     }
 
@@ -629,7 +649,9 @@ public struct FloatingPromptView: View {
                 } else {
                     ForEach(settings.availableModels) { modelInfo in
                         Button {
+                            let oldLabel = currentModelBarLabel
                             settings.currentModel = modelInfo.id
+                            viewModel.handleModelSwitch(from: oldLabel, to: modelInfo.displayLabel)
                         } label: {
                             HStack {
                                 Text(modelInfo.displayLabel)

@@ -60,6 +60,8 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
   * Browse, search, and resume any past conversation directly inside SparkBar via `⌘ + Y` or the History button.
 * **Dynamic API Model Discovery (`GET /v1/models`):**
   * Automatically fetches live models and supported Thinking Effort levels (`None`, `Default`, `Low`, `High`, `Max`) from **DeepSeek**, **OpenAI**, **OpenRouter**, **Anthropic Claude**, **Groq**, **Google Gemini**, and **Local Ollama / LM Studio**.
+* **Model Changing & Model Awareness:**
+  * Switching models mid-conversation automatically inserts an inline end-to-end divider (`——— Switched to: <Model> ———`) in the chat stream and attaches a context note to your next prompt so the new model is aware of the handoff.
 * **Rich Markdown, Tables & Native LaTeX Rendering:**
   * Supports GitHub-flavored Markdown tables, ASCII box-drawing tables, syntax-styled code blocks, and native KaTeX math blocks (`$$...$$` and `$...$`).
 

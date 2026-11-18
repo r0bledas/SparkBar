@@ -24,6 +24,8 @@ public final class ChatViewModel: ObservableObject {
     private let client = LLMStreamingClient()
     private var currentTask: Task<Void, Never>?
     private var isSanitizingInput: Bool = false
+    public let scrollToMessageTrigger = PassthroughSubject<UUID, Never>()
+    private var pendingModelSwitchNote: String? = nil
 
     public init() {}
 
@@ -72,7 +74,13 @@ public final class ChatViewModel: ObservableObject {
         let imagesToSend = attachedImages
         attachedImages = []
 
-        let userMsg = ChatMessage(role: .user, content: prompt, attachedImages: imagesToSend)
+        var finalPrompt = prompt
+        if let switchNote = pendingModelSwitchNote {
+            finalPrompt = "[System Note: \(switchNote)]\n\n" + prompt
+            pendingModelSwitchNote = nil
+        }
+
+        let userMsg = ChatMessage(role: .user, content: finalPrompt, attachedImages: imagesToSend)
         messages.append(userMsg)
         persistCurrentSession()
 
@@ -187,8 +195,24 @@ public final class ChatViewModel: ObservableObject {
         messages = session.messages
         errorMessage = nil
         showHistory = false
+        pendingModelSwitchNote = nil
         ConversationStore.shared.activeSessionId = session.id
         PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty)
+
+        if let lastUserMsgId = messages.last(where: { $0.role == .user })?.id {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
+                self?.scrollToMessageTrigger.send(lastUserMsgId)
+            }
+        }
+    }
+
+    /// Inserts an inline divider when the user switches models mid-conversation and queues a context note for the next turn.
+    public func handleModelSwitch(from oldModel: String, to newModel: String) {
+        guard !messages.isEmpty, !newModel.isEmpty, oldModel != newModel else { return }
+        let dividerMsg = ChatMessage(role: .system, content: "Switched to: \(newModel)")
+        messages.append(dividerMsg)
+        pendingModelSwitchNote = "The user switched the active model from '\(oldModel)' to '\(newModel)'. Continue the conversation seamlessly with full awareness of this model change."
+        persistCurrentSession()
     }
 
     public func toggleHistory() {
