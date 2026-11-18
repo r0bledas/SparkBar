@@ -1,8 +1,60 @@
 import SwiftUI
+import AppKit
+
+/// Standalone native macOS Settings window controller, completely independent of the floating prompt panel.
+@MainActor
+public final class SettingsWindowController: NSObject, NSWindowDelegate {
+    public static let shared = SettingsWindowController()
+
+    private var window: NSWindow?
+
+    private override init() {
+        super.init()
+    }
+
+    public var isVisible: Bool {
+        window?.isVisible ?? false
+    }
+
+    public func showWindow() {
+        if window == nil {
+            let hostingController = NSHostingController(rootView: SettingsSheetView())
+            let win = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 580, height: 640),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            win.title = "SparkBar Settings"
+            win.minSize = NSSize(width: 520, height: 520)
+            win.contentViewController = hostingController
+            win.isReleasedWhenClosed = false
+            win.level = .normal
+            win.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+            win.delegate = self
+            win.center()
+            self.window = win
+        }
+
+        ChatViewModel.shared.showSettings = true
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
+    }
+
+    public func closeWindow() {
+        ChatViewModel.shared.showSettings = false
+        window?.close()
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        ChatViewModel.shared.showSettings = false
+    }
+}
 
 public struct SettingsSheetView: View {
     @ObservedObject private var settings = SettingsStore.shared
-    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var updater = GitHubUpdater.shared
     @State private var apiKeyInput: String = ""
     @State private var modelInput: String = ""
     @State private var baseURLInput: String = ""
@@ -24,12 +76,17 @@ public struct SettingsSheetView: View {
                         .font(.system(size: 20))
                         .foregroundStyle(Color.accentColor)
                 }
-                Text("SparkBar Settings")
-                    .font(.system(size: 16, weight: .semibold))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("SparkBar Settings")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("v\(updater.installedVersion) (\(updater.installedCommitSHA))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Done") {
+                Button("Save & Close") {
                     saveCurrentProviderFields()
-                    dismiss()
+                    SettingsWindowController.shared.closeWindow()
                 }
                 .keyboardShortcut(.defaultAction)
             }
@@ -38,7 +95,7 @@ public struct SettingsSheetView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Provider Picker (Moved into Settings, default DeepSeek)
+                    // Provider Picker (Default DeepSeek)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Default AI Provider")
                             .font(.system(size: 12, weight: .semibold))
@@ -229,6 +286,62 @@ public struct SettingsSheetView: View {
                         Toggle("Show SparkBar icon in the menu bar", isOn: $settings.showMenuBarIcon)
                             .font(.system(size: 13))
                     }
+
+                    Divider()
+
+                    // Software Update from GitHub
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Updates & GitHub Sync")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                if let url = URL(string: GitHubUpdater.repoWebURL) {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            } label: {
+                                Label("r0bledas/SparkBar", systemImage: "arrow.up.right.square")
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            .buttonStyle(.link)
+                        }
+
+                        HStack(spacing: 10) {
+                            Button {
+                                updater.performUpdateFromGitHub()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if updater.isUpdating {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                                    }
+                                    Text(updater.isUpdating ? "Updating & Rebuilding…" : "Update from GitHub")
+                                        .font(.system(size: 12.5, weight: .medium))
+                                }
+                            }
+                            .disabled(updater.isUpdating || updater.isChecking)
+
+                            Button {
+                                Task {
+                                    await updater.checkLatestCommit()
+                                }
+                            } label: {
+                                Text(updater.isChecking ? "Checking…" : "Check Latest Commit")
+                                    .font(.system(size: 12))
+                            }
+                            .disabled(updater.isUpdating || updater.isChecking)
+                        }
+
+                        if !updater.statusMessage.isEmpty {
+                            Text(updater.statusMessage)
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(updater.isError ? Color.orange : Color.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
                 }
                 .padding(.trailing, 4)
             }
@@ -240,7 +353,7 @@ public struct SettingsSheetView: View {
             }
         }
         .padding(20)
-        .frame(width: 540, height: 540)
+        .frame(minWidth: 520, idealWidth: 580, maxWidth: .infinity, minHeight: 520, idealHeight: 620, maxHeight: .infinity)
         .onAppear {
             loadFields(for: settings.selectedProvider)
         }

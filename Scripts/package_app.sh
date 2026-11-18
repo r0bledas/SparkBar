@@ -2,7 +2,8 @@
 set -euo pipefail
 
 APP_NAME="SparkBar"
-VERSION="${1:-1.0.1}"
+VERSION="${1:-1.4.0}"
+GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 BUNDLE_DIR="dist/${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
@@ -49,6 +50,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
     <string>${VERSION}</string>
     <key>CFBundleVersion</key>
     <string>2</string>
+    <key>GitCommitSHA</key>
+    <string>${GIT_SHA}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>

@@ -150,6 +150,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "Conversation History…", action: #selector(toggleHistoryAction), keyEquivalent: "y")
         appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAction), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Update from GitHub…", action: #selector(updateFromGitHubAction), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit SparkBar", action: #selector(quitAppAction), keyEquivalent: "q")
 
@@ -260,6 +261,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let updateItem = NSMenuItem(
+            title: "Update from GitHub…",
+            action: #selector(updateFromGitHubAction),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        menu.addItem(updateItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let quitItem = NSMenuItem(
@@ -298,8 +307,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettingsAction() {
-        PanelController.shared.showPanel()
-        ChatViewModel.shared.showSettings = true
+        SettingsWindowController.shared.showWindow()
+    }
+
+    @objc private func updateFromGitHubAction() {
+        SettingsWindowController.shared.showWindow()
+        GitHubUpdater.shared.performUpdateFromGitHub()
     }
 
     @objc private func quitAppAction() {

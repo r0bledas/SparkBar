@@ -148,9 +148,6 @@ public struct FloatingPromptView: View {
         .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
             handleDroppedItems(providers: providers)
         }
-        .sheet(isPresented: $viewModel.showSettings) {
-            SettingsSheetView()
-        }
         .onAppear {
             isInputFocused = true
             PanelController.shared.syncPanelHeight(hasMessages: hasActiveChatArea)
@@ -334,7 +331,7 @@ public struct FloatingPromptView: View {
                                         .foregroundStyle(.primary)
                                         .textSelection(.enabled)
                                     Button("Open Settings") {
-                                        viewModel.showSettings = true
+                                        SettingsWindowController.shared.showWindow()
                                     }
                                     .controlSize(.small)
                                 }
@@ -969,7 +966,7 @@ public struct FloatingPromptView: View {
             .accessibilityLabel("Conversation History")
 
             Button {
-                viewModel.showSettings = true
+                SettingsWindowController.shared.showWindow()
             } label: {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 12.5))

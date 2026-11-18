@@ -58,6 +58,10 @@ public final class FloatingPanel: NSPanel {
                 onToggleHistoryPressed?()
                 return
             }
+            if char == "," {
+                SettingsWindowController.shared.showWindow()
+                return
+            }
         }
         super.keyDown(with: event)
     }
@@ -75,6 +79,10 @@ public final class FloatingPanel: NSPanel {
             }
             if char == "y" {
                 onToggleHistoryPressed?()
+                return true
+            }
+            if char == "," {
+                SettingsWindowController.shared.showWindow()
                 return true
             }
             if char == "v" {
@@ -294,8 +302,8 @@ public final class PanelController: NSObject, NSWindowDelegate {
                     if self.didDragOutside { return }
                     let vm = ChatViewModel.shared
                     // Never hide while streaming/running tools (e.g. when macOS pops up a folder permission dialog),
-                    // or when settings / file picker are open, or when pinned
-                    if SettingsStore.shared.pinWindowOnBlur || vm.showSettings || vm.isPickingFile || vm.isStreaming || vm.activeToolStatus != nil {
+                    // or when file picker is open, or when pinned
+                    if SettingsStore.shared.pinWindowOnBlur || vm.isPickingFile || vm.isStreaming || vm.activeToolStatus != nil {
                         return
                     }
                     if !NSMouseInRect(mouseLoc, panel.frame, false) {
