@@ -280,7 +280,9 @@ public final class LLMStreamingClient {
             ])
         }
 
-        for msg in messages {
+        var i = 0
+        while i < messages.count {
+            let msg = messages[i]
             switch msg.role {
             case .system:
                 apiMessages.append(["role": "system", "content": msg.content])
@@ -344,15 +346,39 @@ public final class LLMStreamingClient {
                             ]
                         ]
                     }
+                    apiMessages.append(dict)
+
+                    // Collect all immediately following `.tool` responses and ensure every `tool_call_id` has a response
+                    var respondedIds = Set<String>()
+                    var j = i + 1
+                    while j < messages.count && messages[j].role == .tool {
+                        let toolMsg = messages[j]
+                        let callId = toolMsg.toolCallId ?? "call_0"
+                        respondedIds.insert(callId)
+                        apiMessages.append([
+                            "role": "tool",
+                            "tool_call_id": callId,
+                            "content": toolMsg.content
+                        ])
+                        j += 1
+                    }
+                    for tc in tcs where !respondedIds.contains(tc.id) {
+                        apiMessages.append([
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": "[Tool execution interrupted or cancelled]"
+                        ])
+                    }
+                    i = j
+                    continue
+                } else {
+                    apiMessages.append(dict)
                 }
-                apiMessages.append(dict)
             case .tool:
-                apiMessages.append([
-                    "role": "tool",
-                    "tool_call_id": msg.toolCallId ?? "call_0",
-                    "content": msg.content
-                ])
+                // Orphaned tool message without a preceding assistant tool_calls message: skip to avoid HTTP 400
+                break
             }
+            i += 1
         }
 
         var effectiveModel = model
