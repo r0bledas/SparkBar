@@ -153,19 +153,28 @@ public struct FloatingPromptView: View {
     }
 
     private var promptInputBar: some View {
-        HStack(spacing: 10) {
-            TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16.5, weight: .regular))
-                .frame(width: PanelController.panelWidth - 16 - 36 - 34, alignment: .leading)
-                .clipped()
-                .focused($isInputFocused)
-                .onSubmit {
+        HStack(spacing: 12) {
+            WrappingPromptTextView(
+                text: $viewModel.inputText,
+                placeholder: "Ask anything or run a task… (⌥Space)",
+                onSubmit: {
                     viewModel.sendCurrentPrompt()
                 }
-                .accessibilityLabel("Prompt Input")
-
-            Spacer(minLength: 0)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: .black, location: 0.14),
+                        .init(color: .black, location: 0.86),
+                        .init(color: .clear, location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .accessibilityLabel("Prompt Input")
 
             if viewModel.isStreaming {
                 Button {
@@ -178,7 +187,6 @@ public struct FloatingPromptView: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .layoutPriority(2)
                 .help("Stop generating")
                 .accessibilityLabel("Stop generating")
             } else {
@@ -194,14 +202,13 @@ public struct FloatingPromptView: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .layoutPriority(2)
                 .disabled(!canSend)
                 .help("Send prompt (Return)")
                 .accessibilityLabel("Send prompt")
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Chronological Conversation & Tool Stream Area
@@ -539,137 +546,148 @@ public struct FloatingPromptView: View {
     @ViewBuilder
     private func toolRecordBadge(_ record: ToolExecutionRecord) -> some View {
         let isExpanded = expandedToolIds.contains(record.id)
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                if isExpanded {
-                    expandedToolIds.remove(record.id)
-                } else {
-                    expandedToolIds.insert(record.id)
-                }
-            } label: {
+        let commandText = Self.formattedToolCommand(for: record)
+
+        VStack(alignment: .leading, spacing: 0) {
+            // 1. Existing Command Badge Box — expands IN-PLACE to reveal the full command when clicked
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: record.isError ? "xmark.octagon.fill" : "terminal.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(record.isError ? Color.orange : Color.accentColor)
-                    Text(record.toolName)
-                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                    Text(record.arguments)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer()
-                    Text("\(record.durationMs)ms")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    Button {
+                        if isExpanded {
+                            expandedToolIds.remove(record.id)
+                        } else {
+                            expandedToolIds.insert(record.id)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: record.isError ? "xmark.octagon.fill" : "terminal.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(record.isError ? Color.orange : Color.accentColor)
+                            Text(record.toolName)
+                                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                            if !isExpanded {
+                                Text(commandText)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            Spacer(minLength: 4)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if isExpanded {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(commandText, forType: .string)
+                            copiedToolCommandId = record.id
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                if copiedToolCommandId == record.id { copiedToolCommandId = nil }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: copiedToolCommandId == record.id ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 9.5))
+                                Text(copiedToolCommandId == record.id ? "Copied" : "Copy")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(copiedToolCommandId == record.id ? Color.green : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        if isExpanded {
+                            expandedToolIds.remove(record.id)
+                        } else {
+                            expandedToolIds.insert(record.id)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("\(record.durationMs)ms")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                if isExpanded {
+                    Text(commandText)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.primary.opacity(0.92))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            )
+
+            // 2. Connector line + Output box when expanded
+            if isExpanded {
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.38))
+                        .frame(width: 2, height: 12)
+                        .padding(.leading, 24)
+                    Spacer()
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Output")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(record.output, forType: .string)
+                            copiedToolOutputId = record.id
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                if copiedToolOutputId == record.id { copiedToolOutputId = nil }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: copiedToolOutputId == record.id ? "checkmark" : "doc.on.doc")
+                                    .font(.system(size: 9.5))
+                                Text(copiedToolOutputId == record.id ? "Copied" : "Copy")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(copiedToolOutputId == record.id ? Color.green : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 6)
+
+                    ScrollView {
+                        Text(record.output.isEmpty ? "(no output)" : record.output)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 7)
+                    }
+                    .frame(maxHeight: 140)
+                }
+                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
                 )
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                let commandText = Self.formattedToolCommand(for: record)
-                VStack(alignment: .leading, spacing: 0) {
-                    // 1. Full Command / Arguments block with Copy button
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(record.toolName == "run_command" ? "Command" : "Arguments")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(commandText, forType: .string)
-                                copiedToolCommandId = record.id
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                    if copiedToolCommandId == record.id { copiedToolCommandId = nil }
-                                }
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: copiedToolCommandId == record.id ? "checkmark" : "doc.on.doc")
-                                        .font(.system(size: 9.5))
-                                    Text(copiedToolCommandId == record.id ? "Copied" : "Copy")
-                                        .font(.system(size: 10, weight: .medium))
-                                }
-                                .foregroundStyle(copiedToolCommandId == record.id ? Color.green : Color.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.top, 6)
-
-                        ScrollView {
-                            Text(commandText)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.primary.opacity(0.92))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                                .padding(.horizontal, 8)
-                                .padding(.bottom, 7)
-                        }
-                        .frame(maxHeight: 90)
-                    }
-                    .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 8))
-
-                    // 2. Connector line between Command and Output
-                    HStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color.white.opacity(0.38))
-                            .frame(width: 2, height: 12)
-                            .padding(.leading, 24)
-                        Spacer()
-                    }
-
-                    // 3. Output block with Copy button
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Output")
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(record.output, forType: .string)
-                                copiedToolOutputId = record.id
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                    if copiedToolOutputId == record.id { copiedToolOutputId = nil }
-                                }
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Image(systemName: copiedToolOutputId == record.id ? "checkmark" : "doc.on.doc")
-                                        .font(.system(size: 9.5))
-                                    Text(copiedToolOutputId == record.id ? "Copied" : "Copy")
-                                        .font(.system(size: 10, weight: .medium))
-                                }
-                                .foregroundStyle(copiedToolOutputId == record.id ? Color.green : Color.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.top, 6)
-
-                        ScrollView {
-                            Text(record.output.isEmpty ? "(no output)" : record.output)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                                .padding(.horizontal, 8)
-                                .padding(.bottom, 7)
-                        }
-                        .frame(maxHeight: 140)
-                    }
-                    .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
-                }
             }
         }
     }
@@ -1261,6 +1279,116 @@ private struct AttachedImageThumbnailView: View {
             } else {
                 showFileNameTooltip = false
             }
+        }
+    }
+}
+
+/// Multi-line wrapping text input view backed by `SparkBarFieldEditor` inside a fixed-height `NSScrollView`.
+/// Wraps text by lines so the typing caret is never hidden horizontally, auto-scrolls vertically,
+/// submits on `Return`, and inserts a newline on `Shift + Return`.
+private struct WrappingPromptTextView: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+
+        let textView = PromptWrappingNSTextView()
+        textView.delegate = context.coordinator
+        textView.onSubmit = onSubmit
+        textView.placeholderString = placeholder
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        textView.font = NSFont.systemFont(ofSize: 16.5, weight: .regular)
+        textView.textColor = NSColor.labelColor
+        textView.insertionPointColor = NSColor.controlAccentColor
+        textView.textContainerInset = NSSize(width: 0, height: 6)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude)
+
+        scrollView.documentView = textView
+        DispatchQueue.main.async {
+            textView.window?.makeFirstResponder(textView)
+        }
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = scrollView.documentView as? PromptWrappingNSTextView else { return }
+        textView.onSubmit = onSubmit
+        if textView.string != text {
+            textView.string = text
+            textView.needsDisplay = true
+            textView.scrollRangeToVisible(textView.selectedRange())
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: WrappingPromptTextView
+
+        init(_ parent: WrappingPromptTextView) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            if parent.text != tv.string {
+                parent.text = tv.string
+            }
+            tv.needsDisplay = true
+            tv.scrollRangeToVisible(tv.selectedRange())
+        }
+    }
+}
+
+private final class PromptWrappingNSTextView: SparkBarFieldEditor {
+    var onSubmit: (() -> Void)?
+    var placeholderString: String = ""
+
+    override func keyDown(with event: NSEvent) {
+        // Return / Enter without Shift submits the prompt
+        if (event.keyCode == 36 || event.keyCode == 76) && !event.modifierFlags.contains(.shift) {
+            onSubmit?()
+            return
+        }
+        super.keyDown(with: event)
+        scrollRangeToVisible(selectedRange())
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if string.isEmpty && !placeholderString.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 16.5, weight: .regular),
+                .foregroundColor: NSColor.placeholderTextColor
+            ]
+            let inset = textContainerInset
+            let rect = NSRect(
+                x: inset.width + 1,
+                y: inset.height,
+                width: bounds.width - inset.width * 2,
+                height: bounds.height - inset.height * 2
+            )
+            (placeholderString as NSString).draw(in: rect, withAttributes: attrs)
         }
     }
 }
