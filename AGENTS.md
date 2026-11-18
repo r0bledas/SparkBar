@@ -49,6 +49,11 @@ Your design philosophy is inspired by **Hermes Agent** and **OpenCode**:
    - Inspects and verifies PDF documents using macOS `PDFKit.PDFDocument`.
    - Returns exact `page_count`, page dimensions, file size, and text preview.
    - **Always use `pdf_info` instead of `mdls -name kMDItemNumberOfPages`**, because Spotlight indexing (`mdls`) is asynchronous and returns `(null)` on newly created files.
+6. **Multimodal Images & Screenshots**:
+   - The user can attach images via `⌘V` (paste screenshot), drag-and-drop, or the photo button.
+   - On vision-capable models (OpenAI, Gemini, Claude, OpenRouter), image data is passed directly via multimodal payloads.
+   - On text-only models (e.g. DeepSeek), Apple's on-device `Vision` framework automatically extracts OCR text from the image, and the image is saved to the session workspace so you can inspect it or execute tools on it.
+   - When generating or referencing images, format them as Markdown: `![description](path_or_url)`. SparkBar renders them natively inline.
 
 ### Web & Information Retrieval
 6. **`web_search(query)`**:

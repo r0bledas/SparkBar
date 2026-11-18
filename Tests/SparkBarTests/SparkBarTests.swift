@@ -300,4 +300,47 @@ final class SparkBarTests: XCTestCase {
         store.deleteSession(id: testId)
         XCTAssertFalse(store.sessions.contains(where: { $0.id == testId }))
     }
+
+    @MainActor
+    func testImageSupportAndVisionOCRAndMarkdownImageParsing() {
+        // 1. Verify AttachedImage serialization
+        let img = AttachedImage(base64Data: "aGVsbG8=", mimeType: "image/png", fileName: "test.png")
+        let msg = ChatMessage(role: .user, content: "Look at this", attachedImages: [img])
+        let data = try! JSONEncoder().encode(msg)
+        let decoded = try! JSONDecoder().decode(ChatMessage.self, from: data)
+        XCTAssertEqual(decoded.attachedImages.count, 1)
+        XCTAssertEqual(decoded.attachedImages.first?.fileName, "test.png")
+
+        // 2. Verify Markdown image syntax parsing
+        let md = "Here is an image:\n\n![SparkBar Icon](https://example.com/icon.png)\n\nNice!"
+        let blocks = MarkdownMessageView.parseBlocks(from: md)
+        XCTAssertTrue(blocks.contains(where: { block in
+            if case .image(_, let alt, let url) = block {
+                return alt == "SparkBar Icon" && url == "https://example.com/icon.png"
+            }
+            return false
+        }))
+
+        // 3. Verify Vision OCR execution on synthetic bitmap
+        let size = CGSize(width: 240, height: 60)
+        let nsImg = NSImage(size: size)
+        nsImg.lockFocus()
+        NSColor.white.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        let text = "VISION_OCR_TEST" as NSString
+        text.draw(at: NSPoint(x: 10, y: 15), withAttributes: [.font: NSFont.boldSystemFont(ofSize: 22), .foregroundColor: NSColor.black])
+        nsImg.unlockFocus()
+        if let cg = nsImg.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let ocr = VisionOCRHelper.recognizeText(from: cg)
+            XCTAssertTrue(ocr.contains("VISION") || ocr.contains("OCR"), "OCR got: \(ocr)")
+        }
+
+        // 4. Verify ChatViewModel attach and remove
+        let vm = ChatViewModel.shared
+        vm.attachImage(data: "fake_png_data".data(using: .utf8)!, mimeType: "image/png", fileName: "unit_test.png")
+        XCTAssertEqual(vm.attachedImages.last?.fileName, "unit_test.png")
+        let idToRemove = vm.attachedImages.last!.id
+        vm.removeAttachedImage(id: idToRemove)
+        XCTAssertFalse(vm.attachedImages.contains(where: { $0.id == idToRemove }))
+    }
 }

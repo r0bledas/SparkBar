@@ -20,7 +20,7 @@ public final class FloatingPanel: NSPanel {
         self.level = .floating
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         self.animationBehavior = .none
-        self.isMovableByWindowBackground = false
+        self.isMovableByWindowBackground = true
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = true
@@ -75,6 +75,11 @@ public final class FloatingPanel: NSPanel {
             if char == "y" {
                 onToggleHistoryPressed?()
                 return true
+            }
+            if char == "v" {
+                if ChatViewModel.shared.checkAndAttachPasteboardImage() {
+                    return true
+                }
             }
         }
         return super.performKeyEquivalent(with: event)
@@ -234,6 +239,9 @@ public final class PanelController: NSObject, NSWindowDelegate {
         hostingView.sizingOptions = []
         hostingView.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: Self.collapsedHeight)
         hostingView.autoresizingMask = [.width, .height]
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = 16
+        hostingView.layer?.masksToBounds = false
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
         self.panel = panel
@@ -276,14 +284,20 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
     /// Strictly resizes the panel from bottom-to-top by keeping `frame.origin.y` locked at `anchoredBottomOrigin.y`.
     public func syncPanelHeight(hasMessages: Bool) {
-        let targetHeight = hasMessages ? Self.maxExpandedHeight : Self.collapsedHeight
+        let targetHeight = currentTargetHeight()
         applyAnchoredFrame(height: targetHeight, animate: false)
     }
 
     private func currentTargetHeight() -> CGFloat {
         let vm = ChatViewModel.shared
         let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil || vm.showHistory
-        return hasMessages ? Self.maxExpandedHeight : Self.collapsedHeight
+        if hasMessages {
+            return Self.maxExpandedHeight
+        }
+        if !vm.attachedImages.isEmpty {
+            return Self.collapsedHeight + 40
+        }
+        return Self.collapsedHeight
     }
 
     private func applyAnchoredFrame(height: CGFloat, animate: Bool) {

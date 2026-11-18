@@ -285,7 +285,40 @@ public final class LLMStreamingClient {
             case .system:
                 apiMessages.append(["role": "system", "content": msg.content])
             case .user:
-                apiMessages.append(["role": "user", "content": msg.content])
+                if msg.attachedImages.isEmpty {
+                    apiMessages.append(["role": "user", "content": msg.content])
+                } else if provider == .deepseek {
+                    // DeepSeek is text-only: enrich prompt with on-device Vision OCR + local file path
+                    var enriched = msg.content
+                    for img in msg.attachedImages {
+                        let ocr = VisionOCRHelper.recognizeText(from: img.base64Data)
+                        var block = "\n\n[Attached Image: \(img.fileName ?? "image.png")"
+                        if let loc = img.localFilePath {
+                            block += " | Local Path: `\(loc)`"
+                        }
+                        if !ocr.isEmpty {
+                            block += "\nOCR Extracted Text:\n```\n\(ocr)\n```"
+                        }
+                        block += "]"
+                        enriched += block
+                    }
+                    apiMessages.append(["role": "user", "content": enriched])
+                } else {
+                    // Vision-enabled multimodal payload (OpenAI, OpenRouter, Gemini, Groq, Ollama)
+                    var contentParts: [[String: Any]] = []
+                    if !msg.content.isEmpty {
+                        contentParts.append(["type": "text", "text": msg.content])
+                    }
+                    for img in msg.attachedImages {
+                        contentParts.append([
+                            "type": "image_url",
+                            "image_url": [
+                                "url": "data:\(img.mimeType);base64,\(img.base64Data)"
+                            ]
+                        ])
+                    }
+                    apiMessages.append(["role": "user", "content": contentParts])
+                }
             case .assistant:
                 var dict: [String: Any] = ["role": "assistant"]
                 if !msg.content.isEmpty {
@@ -417,7 +450,25 @@ public final class LLMStreamingClient {
         for msg in messages {
             switch msg.role {
             case .user:
-                anthropicMessages.append(["role": "user", "content": msg.content])
+                if msg.attachedImages.isEmpty {
+                    anthropicMessages.append(["role": "user", "content": msg.content])
+                } else {
+                    var contentBlocks: [[String: Any]] = []
+                    for img in msg.attachedImages {
+                        contentBlocks.append([
+                            "type": "image",
+                            "source": [
+                                "type": "base64",
+                                "media_type": img.mimeType,
+                                "data": img.base64Data
+                            ]
+                        ])
+                    }
+                    if !msg.content.isEmpty {
+                        contentBlocks.append(["type": "text", "text": msg.content])
+                    }
+                    anthropicMessages.append(["role": "user", "content": contentBlocks])
+                }
             case .assistant:
                 var contentBlocks: [[String: Any]] = []
                 if !msg.content.isEmpty {

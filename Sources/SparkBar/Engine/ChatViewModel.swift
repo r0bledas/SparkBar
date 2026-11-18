@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 @MainActor
 public final class ChatViewModel: ObservableObject {
@@ -7,6 +8,7 @@ public final class ChatViewModel: ObservableObject {
 
     @Published public var currentSessionId: UUID = UUID()
     @Published public var messages: [ChatMessage] = []
+    @Published public var attachedImages: [AttachedImage] = []
     @Published public var inputText: String = ""
     @Published public var isStreaming: Bool = false
     @Published public var activeToolStatus: String? = nil
@@ -21,7 +23,7 @@ public final class ChatViewModel: ObservableObject {
 
     public func sendCurrentPrompt() {
         let prompt = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
+        guard !prompt.isEmpty || !attachedImages.isEmpty else { return }
         inputText = ""
         sendPrompt(prompt)
     }
@@ -31,7 +33,10 @@ public final class ChatViewModel: ObservableObject {
         errorMessage = nil
         showHistory = false
 
-        let userMsg = ChatMessage(role: .user, content: prompt)
+        let imagesToSend = attachedImages
+        attachedImages = []
+
+        let userMsg = ChatMessage(role: .user, content: prompt, attachedImages: imagesToSend)
         messages.append(userMsg)
         persistCurrentSession()
 
@@ -52,12 +57,72 @@ public final class ChatViewModel: ObservableObject {
         persistCurrentSession()
     }
 
+    public func attachImage(data: Data, mimeType: String, fileName: String? = nil) {
+        let id = UUID()
+        let name = fileName ?? "image_\(String(id.uuidString.prefix(6))).png"
+        let ws = JobManager.shared.workspaceDirectory
+        let localPath = (ws as NSString).appendingPathComponent(name)
+        try? data.write(to: URL(fileURLWithPath: localPath))
+
+        let b64 = data.base64EncodedString()
+        let item = AttachedImage(
+            id: id,
+            base64Data: b64,
+            mimeType: mimeType,
+            fileName: name,
+            localFilePath: localPath
+        )
+        attachedImages.append(item)
+    }
+
+    public func attachImage(from url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        let ext = url.pathExtension.lowercased()
+        let mime: String
+        switch ext {
+        case "png": mime = "image/png"
+        case "gif": mime = "image/gif"
+        case "webp": mime = "image/webp"
+        default: mime = "image/jpeg"
+        }
+        attachImage(data: data, mimeType: mime, fileName: url.lastPathComponent)
+    }
+
+    public func removeAttachedImage(id: UUID) {
+        attachedImages.removeAll { $0.id == id }
+    }
+
+    @discardableResult
+    public func checkAndAttachPasteboardImage() -> Bool {
+        let pb = NSPasteboard.general
+        if let image = NSImage(pasteboard: pb),
+           let tiff = image.tiffRepresentation,
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            attachImage(data: png, mimeType: "image/png", fileName: "Pasted_Screenshot.png")
+            return true
+        }
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            var found = false
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext) {
+                    attachImage(from: url)
+                    found = true
+                }
+            }
+            if found { return true }
+        }
+        return false
+    }
+
     /// Archives the current conversation into `ConversationStore` and starts a fresh empty chat (`⌘N` / `New Chat`).
     public func startNewConversation() {
         stopGeneration()
         persistCurrentSession()
         currentSessionId = UUID()
         messages.removeAll()
+        attachedImages.removeAll()
         errorMessage = nil
         showHistory = false
         ConversationStore.shared.activeSessionId = nil

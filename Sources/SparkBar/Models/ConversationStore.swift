@@ -190,7 +190,16 @@ public final class ConversationStore: ObservableObject {
         for msg in session.messages {
             switch msg.role {
             case .user:
-                md += "## 👤 User\n\n\(msg.content)\n\n"
+                var userText = "## 👤 User\n\n"
+                for img in msg.attachedImages {
+                    if let path = img.localFilePath {
+                        userText += "![Attached Image](\(path))\n\n"
+                    } else {
+                        userText += "*[Attached Image: \(img.fileName ?? "image.png")]*\n\n"
+                    }
+                }
+                userText += "\(msg.content)\n\n"
+                md += userText
             case .assistant:
                 if let reasoning = msg.reasoningContent, !reasoning.isEmpty {
                     md += "<details><summary>Thought Process</summary>\n\n\(reasoning)\n\n</details>\n\n"

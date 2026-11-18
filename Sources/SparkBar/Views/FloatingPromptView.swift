@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 public struct FloatingPromptView: View {
     @ObservedObject private var viewModel = ChatViewModel.shared
@@ -13,6 +14,7 @@ public struct FloatingPromptView: View {
     @State private var scrollToBottomTrigger: Int = 0
     @State private var scrollWheelMonitor: Any? = nil
     @State private var historySearchText: String = ""
+    @State private var isDropTargeted: Bool = false
 
     public init() {}
 
@@ -26,14 +28,23 @@ public struct FloatingPromptView: View {
             if hasActiveChatArea {
                 if viewModel.showHistory {
                     historyBrowserArea
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     conversationArea
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
                 Divider()
                     .opacity(0.45)
+            }
+
+            // Attached images preview bar (if any)
+            if !viewModel.attachedImages.isEmpty {
+                attachedImagesPreviewBar
+                Divider()
+                    .opacity(0.35)
             }
 
             // 2. Prompt Input Box ("Ask anything or run a task…")
@@ -53,10 +64,13 @@ public struct FloatingPromptView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.16), lineWidth: 1)
+                .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.16), lineWidth: isDropTargeted ? 2 : 1)
         )
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onDrop(of: [.fileURL, .image], isTargeted: $isDropTargeted) { providers in
+            handleDroppedItems(providers: providers)
+        }
         .sheet(isPresented: $viewModel.showSettings) {
             SettingsSheetView()
         }
@@ -97,12 +111,66 @@ public struct FloatingPromptView: View {
 
     // MARK: - Prompt Input Bar (Directly above Bottom Control Bar)
 
+    private var attachedImagesPreviewBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(viewModel.attachedImages) { img in
+                    HStack(spacing: 6) {
+                        if let data = Data(base64Encoded: img.base64Data),
+                           let nsImg = NSImage(data: data) {
+                            Image(nsImage: nsImg)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 26, height: 26)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        Text(img.fileName ?? "Image")
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                            .frame(maxWidth: 130, alignment: .leading)
+                        Button {
+                            viewModel.removeAttachedImage(id: img.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove image")
+                    }
+                    .padding(.leading, 4)
+                    .padding(.trailing, 6)
+                    .padding(.vertical, 4)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+                    )
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+        }
+    }
+
     private var promptInputBar: some View {
         HStack(spacing: 11) {
             SparkBarLogoView(
                 size: 21,
                 isActive: viewModel.isStreaming || !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             )
+
+            // Photo attachment button
+            Button {
+                selectImageFromFilePicker()
+            } label: {
+                Image(systemName: "photo")
+                    .font(.system(size: 14))
+                    .foregroundStyle(viewModel.attachedImages.isEmpty ? Color.secondary.opacity(0.7) : Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Attach an image (or paste with ⌘V)")
+            .accessibilityLabel("Attach image")
 
             TextField("Ask anything or run a task… (⌥Space)", text: $viewModel.inputText)
                 .textFieldStyle(.plain)
@@ -165,6 +233,17 @@ public struct FloatingPromptView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        // Subtle top drag handle indicator
+                        HStack {
+                            Spacer()
+                            Capsule()
+                                .fill(Color.primary.opacity(0.18))
+                                .frame(width: 36, height: 4)
+                                .padding(.top, 4)
+                                .padding(.bottom, 6)
+                            Spacer()
+                        }
+
                         let items = visibleMessages
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                             messageRow(for: msg)
@@ -319,15 +398,45 @@ public struct FloatingPromptView: View {
     private func messageRow(for message: ChatMessage) -> some View {
         switch message.role {
         case .user:
-            HStack {
-                Spacer(minLength: 60)
-                Text(message.content)
-                    .font(.system(size: 13.5, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .textSelection(.enabled)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !message.attachedImages.isEmpty {
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 60)
+                        ForEach(message.attachedImages) { img in
+                            if let data = Data(base64Encoded: img.base64Data),
+                               let nsImg = NSImage(data: data) {
+                                Image(nsImage: nsImg)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxHeight: 140)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
+                                    )
+                                    .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+                                    .onTapGesture {
+                                        if let p = img.localFilePath {
+                                            NSWorkspace.shared.open(URL(fileURLWithPath: p))
+                                        }
+                                    }
+                            }
+                        }
+                    }
+                }
+
+                if !message.content.isEmpty {
+                    HStack {
+                        Spacer(minLength: 60)
+                        Text(message.content)
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 8)
+                            .background(Color.accentColor.opacity(0.88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .textSelection(.enabled)
+                    }
+                }
             }
 
         case .tool:
@@ -938,5 +1047,46 @@ public struct FloatingPromptView: View {
     private var hasValidKeyForCurrentProvider: Bool {
         if !settings.selectedProvider.requiresAPIKey { return true }
         return !settings.apiKey(for: settings.selectedProvider).isEmpty
+    }
+
+    private func selectImageFromFilePicker() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image, .png, .jpeg, .webP, .gif, .tiff]
+        panel.begin { response in
+            guard response == .OK else { return }
+            for url in panel.urls {
+                viewModel.attachImage(from: url)
+            }
+        }
+    }
+
+    private func handleDroppedItems(providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url = url else { return }
+                    let ext = url.pathExtension.lowercased()
+                    if ["png", "jpg", "jpeg", "webp", "gif", "heic", "tiff", "bmp"].contains(ext) {
+                        DispatchQueue.main.async {
+                            viewModel.attachImage(from: url)
+                        }
+                    }
+                }
+                handled = true
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                    guard let data = data else { return }
+                    DispatchQueue.main.async {
+                        viewModel.attachImage(data: data, mimeType: "image/png", fileName: "Dropped_Image.png")
+                    }
+                }
+                handled = true
+            }
+        }
+        return handled
     }
 }

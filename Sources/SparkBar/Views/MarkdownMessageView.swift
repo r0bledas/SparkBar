@@ -123,6 +123,26 @@ public struct MathBlockContainerView: View {
     }
 }
 
+public final class RoundedVisualEffectView: NSVisualEffectView {
+    public override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        self.wantsLayer = true
+        self.layer?.cornerRadius = 16
+        self.layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.wantsLayer = true
+        self.layer?.cornerRadius = 16
+        self.layer?.masksToBounds = true
+    }
+
+    public override var mouseDownCanMoveWindow: Bool {
+        return true
+    }
+}
+
 /// Native macOS Visual Effect blur material wrapper for our Spotlight panel.
 public struct VisualEffectBlur: NSViewRepresentable {
     public var material: NSVisualEffectView.Material
@@ -140,11 +160,14 @@ public struct VisualEffectBlur: NSViewRepresentable {
     }
 
     public func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+        let view = RoundedVisualEffectView()
         view.material = material
         view.blendingMode = blendingMode
         view.state = state
         view.isEmphasized = true
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 16
+        view.layer?.masksToBounds = true
         return view
     }
 
@@ -152,6 +175,9 @@ public struct VisualEffectBlur: NSViewRepresentable {
         nsView.material = material
         nsView.blendingMode = blendingMode
         nsView.state = state
+        nsView.wantsLayer = true
+        nsView.layer?.cornerRadius = 16
+        nsView.layer?.masksToBounds = true
     }
 }
 
@@ -164,6 +190,7 @@ public enum MarkdownBlock: Identifiable, Equatable {
     case code(id: Int, language: String, code: String)
     case table(id: Int, headers: [String], rows: [[String]], rawText: String)
     case asciiArt(id: Int, content: String)
+    case image(id: Int, alt: String, urlString: String)
 
     public var id: Int {
         switch self {
@@ -175,6 +202,7 @@ public enum MarkdownBlock: Identifiable, Equatable {
         case .code(let id, _, _): return id
         case .table(let id, _, _, _): return id
         case .asciiArt(let id, _): return id
+        case .image(let id, _, _): return id
         }
     }
 }
@@ -239,6 +267,9 @@ public struct MarkdownMessageView: View {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
                     )
+
+                case .image(_, let alt, let urlString):
+                    MarkdownImageView(urlString: urlString, alt: alt)
 
                 case .code(let id, let lang, let codeContent):
                     VStack(alignment: .leading, spacing: 0) {
@@ -675,6 +706,20 @@ public struct MarkdownMessageView: View {
                 continue
             }
 
+            // 2b. Markdown Image (`![alt](url)`)
+            if trimmed.hasPrefix("![") && trimmed.contains("](") && trimmed.hasSuffix(")") {
+                if let endAlt = trimmed.firstIndex(of: "]"),
+                   let splitRange = trimmed.range(of: "](") {
+                    let alt = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2)..<endAlt])
+                    let url = String(trimmed[splitRange.upperBound..<trimmed.index(before: trimmed.endIndex)])
+                    flushNormalBuffer()
+                    blocks.append(.image(id: nextId, alt: alt, urlString: url))
+                    nextId += 1
+                    idx += 1
+                    continue
+                }
+            }
+
             // 3. Display Math Block (`$$ ... $$` or `\[ ... \]`)
             if trimmed.hasPrefix("$$") || trimmed.hasPrefix("\\[") {
                 let closingToken = trimmed.hasPrefix("$$") ? "$$" : "\\]"
@@ -842,5 +887,65 @@ public struct MarkdownMessageView: View {
         if working.hasPrefix("|") { working.removeFirst() }
         if working.hasSuffix("|") { working.removeLast() }
         return working.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+}
+
+public struct MarkdownImageView: View {
+    public let urlString: String
+    public let alt: String
+
+    public init(urlString: String, alt: String) {
+        self.urlString = urlString
+        self.alt = alt
+    }
+
+    public var body: some View {
+        Group {
+            if urlString.hasPrefix("http://") || urlString.hasPrefix("https://"), let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading image…").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .frame(height: 100)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxHeight: 280)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+                            .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
+                    case .failure:
+                        Label("Failed to load: \(alt.isEmpty ? urlString : alt)", systemImage: "photo.badge.exclamationmark")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else {
+                let resolved = (urlString as NSString).expandingTildeInPath.replacingOccurrences(of: "file://", with: "")
+                if let nsImage = NSImage(contentsOfFile: resolved) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 280)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.18), radius: 4, x: 0, y: 2)
+                        .onTapGesture {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: resolved))
+                        }
+                } else {
+                    Label(alt.isEmpty ? urlString : alt, systemImage: "photo")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

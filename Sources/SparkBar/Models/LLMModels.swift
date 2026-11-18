@@ -143,6 +143,28 @@ public enum MessageRole: String, Codable {
     case tool
 }
 
+public struct AttachedImage: Identifiable, Codable, Equatable {
+    public var id: UUID
+    public var base64Data: String
+    public var mimeType: String
+    public var fileName: String?
+    public var localFilePath: String?
+
+    public init(
+        id: UUID = UUID(),
+        base64Data: String,
+        mimeType: String = "image/jpeg",
+        fileName: String? = nil,
+        localFilePath: String? = nil
+    ) {
+        self.id = id
+        self.base64Data = base64Data
+        self.mimeType = mimeType
+        self.fileName = fileName
+        self.localFilePath = localFilePath
+    }
+}
+
 public struct ChatMessage: Identifiable, Codable, Equatable {
     public var id: UUID
     public var role: MessageRole
@@ -152,6 +174,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
     public var toolCallId: String?
     public var toolName: String?
     public var toolRecords: [ToolExecutionRecord]
+    public var attachedImages: [AttachedImage]
     public var timestamp: Date
 
     public init(
@@ -163,6 +186,7 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         toolCallId: String? = nil,
         toolName: String? = nil,
         toolRecords: [ToolExecutionRecord] = [],
+        attachedImages: [AttachedImage] = [],
         timestamp: Date = Date()
     ) {
         self.id = id
@@ -173,6 +197,25 @@ public struct ChatMessage: Identifiable, Codable, Equatable {
         self.toolCallId = toolCallId
         self.toolName = toolName
         self.toolRecords = toolRecords
+        self.attachedImages = attachedImages
         self.timestamp = timestamp
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, content, reasoningContent, toolCalls, toolCallId, toolName, toolRecords, attachedImages, timestamp
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.role = try container.decode(MessageRole.self, forKey: .role)
+        self.content = try container.decode(String.self, forKey: .content)
+        self.reasoningContent = try container.decodeIfPresent(String.self, forKey: .reasoningContent)
+        self.toolCalls = try container.decodeIfPresent([ToolCallRequest].self, forKey: .toolCalls)
+        self.toolCallId = try container.decodeIfPresent(String.self, forKey: .toolCallId)
+        self.toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        self.toolRecords = try container.decodeIfPresent([ToolExecutionRecord].self, forKey: .toolRecords) ?? []
+        self.attachedImages = try container.decodeIfPresent([AttachedImage].self, forKey: .attachedImages) ?? []
+        self.timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
     }
 }
