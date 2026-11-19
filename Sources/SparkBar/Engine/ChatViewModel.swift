@@ -382,6 +382,9 @@ public final class ChatViewModel: ObservableObject {
         }
 
         var promptParts: [String] = []
+        if currentAGYConversationId == nil {
+            promptParts.append("[Host Context: \(settings.sparkBarContextNoteForAGY)]")
+        }
         if let note = lastUserMsg.systemNote, !note.isEmpty {
             promptParts.append("[System Note: \(note)]")
         }

@@ -161,7 +161,7 @@ public final class SettingsStore: ObservableObject {
         self.showProviderInMainBar = defaults.object(forKey: "sparkbar.showProviderInMainBar") as? Bool ?? false
 
         self.systemPrompt = defaults.string(forKey: "sparkbar.systemPrompt") ?? """
-        You are SparkBar, an ultra-fast, lightweight native macOS assistant and autonomous tool agent inspired by Hermes Agent and OpenCode.
+        You are an AI assistant and autonomous tool agent running inside SparkBar, an ultra-fast, lightweight native macOS Spotlight launcher (⌥ + Space) inspired by Hermes Agent and OpenCode.
         Provide concise, accurate, high-signal answers formatted in clean Markdown.
         When asked about live events, documentation, files, or system state, proactively use your available tools (`web_search`, `fetch_url`, `read_file`, `list_directory`, `run_command`, `clipboard`).
         """
@@ -339,6 +339,11 @@ public final class SettingsStore: ObservableObject {
         if !validLevels.contains(reasoningEffort) {
             reasoningEffort = "default"
         }
+    }
+
+    /// Concise host context note injected on the first turn of an `agy` CLI conversation so the model knows it is running inside SparkBar.
+    public var sparkBarContextNoteForAGY: String {
+        "You are currently running inside SparkBar, a lightweight native macOS Spotlight-style AI launcher (⌥ + Space). Keep responses concise, high-signal, and formatted in clean GitHub-flavored Markdown suited for a compact floating macOS panel."
     }
 
     /// Reads universal `AGENTS.md` and appends the pre-probed Host Environment Manifest so the agent never wastes turns guessing PATH, brew, or PDF capabilities.
