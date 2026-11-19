@@ -330,7 +330,7 @@ public final class ChatViewModel: ObservableObject {
 
                     for call in result.toolCalls {
                         if Task.isCancelled { break }
-                        activeToolStatus = "Running \(call.name)..."
+                        activeToolStatus = Self.friendlyToolStatus(for: call.name)
                         let record = await ToolExecutor.execute(call)
                         if Task.isCancelled { break }
 
@@ -449,7 +449,7 @@ public final class ChatViewModel: ObservableObject {
                             self.messages.remove(at: idx)
                             initialPlaceholderId = nil
                         }
-                        self.activeToolStatus = "Running \(toolName)..."
+                        self.activeToolStatus = Self.friendlyToolStatus(for: toolName)
 
                     case .toolCompleted(_, let record):
                         self.activeToolStatus = nil
@@ -513,5 +513,18 @@ public final class ChatViewModel: ObservableObject {
             pendingModelSwitchBanner = nil
         }
         persistCurrentSession()
+    }
+
+    private static func friendlyToolStatus(for toolName: String) -> String {
+        switch toolName.lowercased() {
+        case "web_search", "search_web":
+            return "Searching…"
+        case "fetch_url", "read_url_content":
+            return "Reading page…"
+        case "run_command":
+            return "Running command…"
+        default:
+            return "Running \(toolName)…"
+        }
     }
 }
