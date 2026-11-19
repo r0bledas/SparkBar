@@ -61,6 +61,7 @@ public struct SettingsSheetView: View {
     @State private var showSavedToast: Bool = false
     @State private var isDownloadingAGY: Bool = false
     @State private var agyDownloadStatus: String = ""
+    @State private var showRemoveAccountConfirm: Bool = false
 
     public init() {}
 
@@ -197,16 +198,15 @@ public struct SettingsSheetView: View {
                                     .controlSize(.small)
                                     .help("Add another Google account")
 
-                                    if agyAccounts.accounts.count > 1,
-                                       agyAccounts.isRemovableAccount(agyAccounts.activeAccount) {
+                                    if !agyAccounts.activeAccount.isEmpty {
                                         Button {
-                                            agyAccounts.removeAccount(named: agyAccounts.activeAccount)
+                                            showRemoveAccountConfirm = true
                                         } label: {
                                             Image(systemName: "minus")
                                                 .font(.system(size: 11, weight: .semibold))
                                         }
                                         .controlSize(.small)
-                                        .help("Remove selected account")
+                                        .help(agyAccounts.accounts.count <= 1 ? "Sign out & remove account" : "Remove selected account")
                                     }
                                 }
                             }
@@ -422,6 +422,21 @@ public struct SettingsSheetView: View {
         .onAppear {
             loadFields(for: settings.selectedProvider)
             agyAccounts.reload()
+        }
+        .alert(
+            agyAccounts.accounts.count <= 1 ? "Sign Out & Remove Last Account?" : "Remove Account?",
+            isPresented: $showRemoveAccountConfirm
+        ) {
+            Button("Cancel", role: .cancel) {}
+            Button(agyAccounts.accounts.count <= 1 ? "Sign Out & Remove" : "Remove", role: .destructive) {
+                agyAccounts.removeAccount(named: agyAccounts.activeAccount)
+            }
+        } message: {
+            if agyAccounts.accounts.count <= 1 {
+                Text("You are about to remove your last account (\(agyAccounts.activeAccount)). This will sign you out of AGY in SparkBar.")
+            } else {
+                Text("Remove \(agyAccounts.activeAccount) from SparkBar?")
+            }
         }
     }
 

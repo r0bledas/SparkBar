@@ -711,12 +711,14 @@ public final class AGYAccountManager: ObservableObject {
         try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
 
         let liveToken = existingLiveTokenURL(in: paths)
-        let hostEmail = Self.detectHostSignedInEmail()
-        let hasHostSession = (liveToken != nil) || (hostEmail != nil) || fm.fileExists(atPath: paths.cliStateURL.path)
+        let signedOutMarker = paths.accountsDir.appendingPathComponent(".signed_out")
+        let explicitlySignedOut = fm.fileExists(atPath: signedOutMarker.path)
+        let hostEmail = explicitlySignedOut ? nil : Self.detectHostSignedInEmail()
+        let hasHostSession = !explicitlySignedOut && ((liveToken != nil) || (hostEmail != nil) || fm.fileExists(atPath: paths.cliStateURL.path))
         var discovered = listAccountNames(in: paths.accountsDir)
 
         // Auto-migrate existing standalone token file into an email-named profile if none saved yet
-        if let tokenURL = liveToken, discovered.isEmpty {
+        if !explicitlySignedOut, let tokenURL = liveToken, discovered.isEmpty {
             let inferredName = Self.extractEmail(from: tokenURL) ?? hostEmail ?? "account"
             storeToken(from: tokenURL, as: inferredName, in: paths.accountsDir)
             writeActive(inferredName, to: paths.activeFile)
@@ -735,7 +737,7 @@ public final class AGYAccountManager: ObservableObject {
         } else {
             self.activeAccount = discovered.first ?? ""
         }
-        self.isSignedIn = hasHostSession || !discovered.isEmpty
+        self.isSignedIn = !explicitlySignedOut && (hasHostSession || !discovered.isEmpty)
     }
 
     /// Best-effort extraction of an email address from a JSON, JWT, or Antigravity storage file.
@@ -811,9 +813,21 @@ public final class AGYAccountManager: ObservableObject {
         let fm = FileManager.default
         let dir = paths.accountsDir.appendingPathComponent(name, isDirectory: true)
         try? fm.removeItem(at: dir)
-        if activeAccount == name {
+
+        let wasLast = accounts.count <= 1
+        if activeAccount == name || wasLast {
             try? fm.removeItem(at: paths.activeFile)
+            try? fm.removeItem(at: paths.modernLiveTokenURL)
+            try? fm.removeItem(at: paths.legacyLiveTokenURL)
         }
+
+        if wasLast {
+            let signedOutMarker = paths.accountsDir.appendingPathComponent(".signed_out")
+            try? "1".write(to: signedOutMarker, atomically: true, encoding: .utf8)
+            reload(portableRoot: root)
+            return
+        }
+
         reload(portableRoot: root)
         if !activeAccount.isEmpty {
             switchAccount(to: activeAccount, portableRoot: root)
@@ -857,7 +871,7 @@ public final class AGYAccountManager: ObservableObject {
         save_token_file() {
             local SRC="$1"
             local EMAIL
-            EMAIL=$(grep -aoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}' "$SRC" "\(tempHome.path)/Library/Application Support/Antigravity/app_storage.json" 2>/dev/null | head -n1 || true)
+            EMAIL=$(grep -ahoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}' "$SRC" "\(tempHome.path)/Library/Application Support/Antigravity/app_storage.json" 2>/dev/null | head -n1 || true)
             if [ -z "$EMAIL" ]; then
                 EMAIL="\(fallbackName)"
             fi
@@ -872,6 +886,7 @@ public final class AGYAccountManager: ObservableObject {
             chmod 600 "\(paths.modernLiveTokenURL.path)"
             cp -f "$SRC" "\(paths.legacyLiveTokenURL.path)"
             chmod 600 "\(paths.legacyLiveTokenURL.path)"
+            rm -f "\(paths.accountsDir.path)/.signed_out"
             printf '%s\\r\\n' "$EMAIL" > "\(paths.activeFile.path)"
             touch "\(doneMarker.path)"
         }
