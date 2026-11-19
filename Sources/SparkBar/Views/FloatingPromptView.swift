@@ -603,8 +603,8 @@ public struct FloatingPromptView: View {
                         }
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: record.isError ? "xmark.octagon.fill" : "terminal.fill")
-                                .font(.system(size: 11))
+                            Image(systemName: Self.iconName(for: record))
+                                .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(record.isError ? Color.orange : Color.accentColor)
                             Text(record.toolName)
                                 .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
@@ -733,6 +733,24 @@ public struct FloatingPromptView: View {
                 )
             }
         }
+    }
+
+    private static func iconName(for record: ToolExecutionRecord) -> String {
+        if record.isError { return "xmark.octagon.fill" }
+        let name = record.toolName.lowercased()
+        if name.contains("search") || name.contains("web") || name.contains("url") {
+            return "globe"
+        }
+        if name.contains("file") || name.contains("dir") || name.contains("grep") || name.contains("find") {
+            return "doc.text"
+        }
+        if name.contains("clipboard") {
+            return "doc.on.clipboard"
+        }
+        if name.contains("pdf") {
+            return "doc.richtext"
+        }
+        return "apple.terminal"
     }
 
     private static func formattedToolCommand(for record: ToolExecutionRecord) -> String {
@@ -1004,7 +1022,7 @@ public struct FloatingPromptView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
-                Text("Past Conversations")
+                Text("History")
                     .font(.system(size: 13.5, weight: .semibold))
 
                 Text("(\(conversationStore.sessions.count))")
@@ -1055,7 +1073,7 @@ public struct FloatingPromptView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
-                TextField("Search past conversations…", text: $historySearchText)
+                TextField("Search history…", text: $historySearchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
                 if !historySearchText.isEmpty {

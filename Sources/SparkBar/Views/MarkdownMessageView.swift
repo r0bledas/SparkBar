@@ -481,6 +481,11 @@ public struct MarkdownMessageView: View {
                 .font(font)
                 .foregroundStyle(.primary)
                 .tint(Color(nsColor: .linkColor))
+                .environment(\.openURL, OpenURLAction { url in
+                    NSWorkspace.shared.open(url)
+                    PanelController.shared.hidePanel()
+                    return .handled
+                })
                 .textSelection(.enabled)
         } else {
             Text(processed)
@@ -501,6 +506,11 @@ public struct MarkdownMessageView: View {
             .lineSpacing(3)
             .foregroundStyle(.primary)
             .tint(Color(nsColor: .linkColor))
+            .environment(\.openURL, OpenURLAction { url in
+                NSWorkspace.shared.open(url)
+                PanelController.shared.hidePanel()
+                return .handled
+            })
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
     }
@@ -593,11 +603,12 @@ public struct MarkdownMessageView: View {
             }
         }
 
-        // 2. Style every link run with bright native link blue + crisp underline
+        // 2. Style every link run with stable native link blue, clean single underline (no mixed NSColor jitter),
+        //    and pointing-hand hover cursor.
         for run in attr.runs where run.link != nil {
             attr[run.range].foregroundColor = Color(nsColor: .linkColor)
             attr[run.range].underlineStyle = .single
-            attr[run.range].underlineColor = NSColor.linkColor
+            attr[run.range].cursor = .pointingHand
         }
 
         return attr
