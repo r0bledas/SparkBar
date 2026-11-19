@@ -477,14 +477,16 @@ public struct MarkdownMessageView: View {
             markdown: processed,
             options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
-            Text(attributed)
+            Text(Self.styleLinks(in: attributed))
                 .font(font)
                 .foregroundStyle(.primary)
+                .tint(Color(nsColor: .linkColor))
                 .textSelection(.enabled)
         } else {
             Text(processed)
                 .font(font)
                 .foregroundStyle(.primary)
+                .tint(Color(nsColor: .linkColor))
                 .textSelection(.enabled)
         }
     }
@@ -498,6 +500,7 @@ public struct MarkdownMessageView: View {
             .font(.system(size: 14, weight: .regular))
             .lineSpacing(3)
             .foregroundStyle(.primary)
+            .tint(Color(nsColor: .linkColor))
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
     }
@@ -563,7 +566,41 @@ public struct MarkdownMessageView: View {
                 result.append(AttributedString("\n"))
             }
         }
-        return result
+        return styleLinks(in: result)
+    }
+
+    /// Auto-links bare `https://` / `http://` URLs and styles all hyperlinks with bright macOS link color + single underline
+    /// so every clickable link stands out unmistakably inside the translucent HUD panel.
+    private static func styleLinks(in input: AttributedString) -> AttributedString {
+        var attr = input
+
+        // 1. Auto-detect bare URLs inside plain text that aren't already Markdown links
+        let plainText = String(attr.characters)
+        if plainText.contains("http://") || plainText.contains("https://"),
+           let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            let nsRange = NSRange(plainText.startIndex..<plainText.endIndex, in: plainText)
+            for match in detector.matches(in: plainText, options: [], range: nsRange) {
+                guard let url = match.url,
+                      let stringRange = Range(match.range, in: plainText),
+                      let attrStart = AttributedString.Index(stringRange.lowerBound, within: attr),
+                      let attrEnd = AttributedString.Index(stringRange.upperBound, within: attr) else {
+                    continue
+                }
+                let attrRange = attrStart..<attrEnd
+                if attr[attrRange].link == nil {
+                    attr[attrRange].link = url
+                }
+            }
+        }
+
+        // 2. Style every link run with bright native link blue + crisp underline
+        for run in attr.runs where run.link != nil {
+            attr[run.range].foregroundColor = Color(nsColor: .linkColor)
+            attr[run.range].underlineStyle = .single
+            attr[run.range].underlineColor = NSColor.linkColor
+        }
+
+        return attr
     }
 
     // MARK: - LaTeX to Unicode Mathematical Formatter
