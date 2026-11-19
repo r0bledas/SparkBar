@@ -91,10 +91,23 @@ public final class AGYCLIRunner: @unchecked Sendable {
         return env
     }
 
-    /// Parses the stdout of `agy models` into SparkBar `RemoteModelInfo` items.
+    /// Parses the stdout of `agy models` into grouped SparkBar `RemoteModelInfo` items.
+    /// Models sharing the same base name + trailing `(<Variant>)` (e.g. `Gemini 4 Neon (Low)`, `Gemini 4 Neon (High)`,
+    /// `Orchestrator (Neon)`, `Orchestrator (Argon)`) are consolidated into one model entry whose
+    /// `supportedEffortLevels` and `effortVariantModelIds` map each variant to its exact `agy --model` ID.
     public static func parseModelsOutput(_ rawOutput: String) -> [RemoteModelInfo] {
-        var results: [RemoteModelInfo] = []
-        var seen: Set<String> = []
+        struct RawEntry {
+            let id: String
+            let displayName: String
+            let baseName: String
+            let parenVariant: String?
+        }
+
+        let knownEffortLevels: Set<String> = ["low", "medium", "high", "xhigh", "max"]
+        let effortOrder: [String: Int] = ["low": 0, "medium": 1, "high": 2, "xhigh": 3, "max": 4]
+
+        var rawEntries: [RawEntry] = []
+        var seenIds: Set<String> = []
 
         for rawLine in rawOutput.components(separatedBy: .newlines) {
             // Strip spinner carriage-return updates (keep only the text after the last '\r')
@@ -107,18 +120,107 @@ public final class AGYCLIRunner: @unchecked Sendable {
             let parts = trimmed.split(maxSplits: 1, omittingEmptySubsequences: true, whereSeparator: { $0 == " " || $0 == "\t" })
             guard let idSub = parts.first else { continue }
             let id = String(idSub).trimmingCharacters(in: .whitespaces)
-            guard !id.isEmpty, !id.contains("["), !seen.contains(id) else { continue }
+            guard !id.isEmpty, !id.contains("["), !seenIds.contains(id) else { continue }
 
-            // Model IDs are lowercase alphanumeric with hyphens/dots
             let validIdChars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
             guard id.unicodeScalars.allSatisfy({ validIdChars.contains($0) }) else { continue }
 
-            let displayName: String? = parts.count > 1
+            let displayName = parts.count > 1
                 ? String(parts[1]).trimmingCharacters(in: .whitespaces)
-                : nil
+                : id
 
-            seen.insert(id)
-            results.append(RemoteModelInfo(id: id, name: displayName, ownedBy: "antigravity"))
+            // Detect trailing " (<Variant>)" pattern
+            var baseName = displayName
+            var parenVariant: String? = nil
+            if displayName.hasSuffix(")"),
+               let openIdx = displayName.lastIndex(of: "("),
+               openIdx > displayName.startIndex {
+                let candidateBase = displayName[..<openIdx].trimmingCharacters(in: .whitespaces)
+                let candidateVariant = displayName[displayName.index(after: openIdx)..<displayName.index(before: displayName.endIndex)]
+                    .trimmingCharacters(in: .whitespaces)
+                if !candidateBase.isEmpty && !candidateVariant.isEmpty {
+                    baseName = candidateBase
+                    parenVariant = candidateVariant
+                }
+            }
+
+            seenIds.insert(id)
+            rawEntries.append(RawEntry(id: id, displayName: displayName, baseName: baseName, parenVariant: parenVariant))
+        }
+
+        // Count how many entries share each baseName (with a parenthetical variant)
+        var baseNameCounts: [String: Int] = [:]
+        for entry in rawEntries where entry.parenVariant != nil {
+            baseNameCounts[entry.baseName, default: 0] += 1
+        }
+
+        // Group entries in stable order of first appearance
+        var groupOrder: [String] = []
+        var groupedEntries: [String: [RawEntry]] = [:]
+
+        for entry in rawEntries {
+            let shouldGroup: Bool
+            if let v = entry.parenVariant {
+                shouldGroup = (baseNameCounts[entry.baseName] ?? 0) > 1 || knownEffortLevels.contains(v.lowercased())
+            } else {
+                shouldGroup = false
+            }
+
+            let groupKey = shouldGroup ? "group:\(entry.baseName)" : "single:\(entry.id)"
+            if groupedEntries[groupKey] == nil {
+                groupOrder.append(groupKey)
+                groupedEntries[groupKey] = []
+            }
+            groupedEntries[groupKey]?.append(entry)
+        }
+
+        var results: [RemoteModelInfo] = []
+        for key in groupOrder {
+            guard let entries = groupedEntries[key], let first = entries.first else { continue }
+
+            if key.hasPrefix("group:") {
+                var variantMap: [String: String] = [:]
+                var variantKeys: [String] = []
+
+                for e in entries {
+                    guard let v = e.parenVariant else { continue }
+                    let vKey = v.lowercased()
+                    if variantMap[vKey] == nil {
+                        variantMap[vKey] = e.id
+                        variantKeys.append(vKey)
+                    }
+                }
+
+                // Sort known effort levels in ascending order (low -> medium -> high -> xhigh -> max)
+                let allKnownEfforts = variantKeys.allSatisfy { effortOrder[$0] != nil }
+                if allKnownEfforts {
+                    variantKeys.sort { (effortOrder[$0] ?? 99) < (effortOrder[$1] ?? 99) }
+                }
+
+                // Choose sensible default variant: medium -> high -> first
+                let defaultKey: String
+                if variantMap["medium"] != nil {
+                    defaultKey = "medium"
+                } else if variantMap["high"] != nil {
+                    defaultKey = "high"
+                } else {
+                    defaultKey = variantKeys.first ?? ""
+                }
+                let defaultId = variantMap[defaultKey] ?? first.id
+
+                results.append(
+                    RemoteModelInfo(
+                        id: defaultId,
+                        name: first.baseName,
+                        ownedBy: "antigravity",
+                        supportedEffortLevels: variantKeys,
+                        defaultEffortLevel: defaultKey.isEmpty ? nil : defaultKey,
+                        effortVariantModelIds: variantMap
+                    )
+                )
+            } else {
+                results.append(RemoteModelInfo(id: first.id, name: first.displayName, ownedBy: "antigravity"))
+            }
         }
 
         return results

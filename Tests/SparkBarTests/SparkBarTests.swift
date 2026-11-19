@@ -345,17 +345,36 @@ final class SparkBarTests: XCTestCase {
     }
 
     func testAGYCLIRunnerParsingAndLiveDiscovery() async throws {
-        // 1. Verify `agy models` parser handles spinner carriage returns and extracts ID + display name
+        // 1. Verify `agy models` parser groups same base model + (<Variant>) into clean models with effort/variant mapping
         let sampleModels = """
         \r⠋ Fetching available models...\r⠙ Fetching available models...\rgemini-4-neon-high              Gemini 4 Neon (High)
+        gemini-4-neon-xhigh             Gemini 4 Neon (XHigh)
+        gemini-4-neon-medium            Gemini 4 Neon (Medium)
+        gemini-4-neon-low               Gemini 4 Neon (Low)
+        gemini-pro-orchestrator-neon    Orchestrator (Neon)
+        gemini-pro-orchestrator-g1-pro  Orchestrator (Argon)
         claude-sonnet-5-5-medium        Claude Sonnet 5.5 (Medium)
         gpt-oss-120b-medium             GPT-OSS 120B (Medium)
         """
         let parsedModels = AGYCLIRunner.parseModelsOutput(sampleModels)
-        XCTAssertEqual(parsedModels.count, 3)
-        XCTAssertEqual(parsedModels[0].id, "gemini-4-neon-high")
-        XCTAssertEqual(parsedModels[0].displayLabel, "Gemini 4 Neon (High)")
-        XCTAssertEqual(parsedModels[1].id, "claude-sonnet-5-5-medium")
+        XCTAssertEqual(parsedModels.count, 4)
+
+        let neon = parsedModels[0]
+        XCTAssertEqual(neon.displayLabel, "Gemini 4 Neon")
+        XCTAssertEqual(neon.supportedEffortLevels, ["low", "medium", "high", "xhigh"])
+        XCTAssertEqual(neon.defaultEffortLevel, "medium")
+        XCTAssertEqual(neon.resolvedModelId(forEffort: "xhigh"), "gemini-4-neon-xhigh")
+        XCTAssertEqual(neon.resolvedModelId(forEffort: "low"), "gemini-4-neon-low")
+        XCTAssertEqual(neon.resolvedModelId(forEffort: "default"), "gemini-4-neon-medium")
+
+        let orch = parsedModels[1]
+        XCTAssertEqual(orch.displayLabel, "Orchestrator")
+        XCTAssertEqual(orch.supportedEffortLevels, ["neon", "argon"])
+        XCTAssertEqual(orch.resolvedModelId(forEffort: "argon"), "gemini-pro-orchestrator-g1-pro")
+        XCTAssertEqual(orch.resolvedModelId(forEffort: "neon"), "gemini-pro-orchestrator-neon")
+
+        XCTAssertEqual(parsedModels[2].displayLabel, "Claude Sonnet 5.5")
+        XCTAssertEqual(parsedModels[3].displayLabel, "GPT-OSS 120B")
 
         // 2. Verify NDJSON stream parser for init, text_delta, tool ACTIVE/DONE, and result
         let initLine = #"{"event":"init","conversation_id":"conv-123"}"#

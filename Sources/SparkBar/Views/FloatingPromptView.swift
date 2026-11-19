@@ -852,13 +852,15 @@ public struct FloatingPromptView: View {
                     .opacity(0.6)
 
                 Menu {
-                    Button {
-                        settings.reasoningEffort = "none"
-                    } label: {
-                        HStack {
-                            Text("None")
-                            if settings.reasoningEffort.lowercased() == "none" {
-                                Image(systemName: "checkmark")
+                    if settings.currentModelInfo?.effortVariantModelIds == nil {
+                        Button {
+                            settings.reasoningEffort = "none"
+                        } label: {
+                            HStack {
+                                Text("None")
+                                if settings.reasoningEffort.lowercased() == "none" {
+                                    Image(systemName: "checkmark")
+                                }
                             }
                         }
                     }
@@ -881,7 +883,7 @@ public struct FloatingPromptView: View {
                             settings.reasoningEffort = level
                         } label: {
                             HStack {
-                                Text(level.capitalized)
+                                Text(settings.effortDisplayLabel(for: level))
                                 if settings.reasoningEffort.lowercased() == level.lowercased() {
                                     Image(systemName: "checkmark")
                                 }

@@ -58,7 +58,7 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-/// Dynamic model metadata fetched live from `GET /models` — zero hardcoded model lists.
+/// Dynamic model metadata fetched live from `GET /models` or `agy models` — zero hardcoded model lists.
 public struct RemoteModelInfo: Identifiable, Codable, Equatable {
     public var id: String
     public var name: String?
@@ -67,6 +67,9 @@ public struct RemoteModelInfo: Identifiable, Codable, Equatable {
     public var maxOutputTokens: Int?
     public var supportedEffortLevels: [String]
     public var defaultEffortLevel: String?
+    /// Optional mapping from lowercase effort/variant key (e.g. `"low"`, `"high"`, `"xhigh"`, `"neon"`)
+    /// to the exact backend model ID (e.g. `"gemini-4-neon-high"`, `"gemini-pro-orchestrator-neon"`).
+    public var effortVariantModelIds: [String: String]?
 
     public init(
         id: String,
@@ -75,7 +78,8 @@ public struct RemoteModelInfo: Identifiable, Codable, Equatable {
         contextWindow: Int? = nil,
         maxOutputTokens: Int? = nil,
         supportedEffortLevels: [String] = [],
-        defaultEffortLevel: String? = nil
+        defaultEffortLevel: String? = nil,
+        effortVariantModelIds: [String: String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -84,9 +88,28 @@ public struct RemoteModelInfo: Identifiable, Codable, Equatable {
         self.maxOutputTokens = maxOutputTokens
         self.supportedEffortLevels = supportedEffortLevels
         self.defaultEffortLevel = defaultEffortLevel
+        self.effortVariantModelIds = effortVariantModelIds
     }
 
-    /// Shows the clean API model name (e.g. `DeepSeek-V4.1-Flash` or `DeepSeek-V4-Pro`) without repeating the ID in parentheses.
+    /// Resolves the concrete backend model ID for a given effort/variant selection.
+    public func resolvedModelId(forEffort effort: String?) -> String {
+        guard let variants = effortVariantModelIds, !variants.isEmpty else {
+            return id
+        }
+        let key = (effort ?? "default").lowercased()
+        if let exact = variants[key] {
+            return exact
+        }
+        if key == "none", let lowest = variants["low"] {
+            return lowest
+        }
+        if let defKey = defaultEffortLevel?.lowercased(), let defId = variants[defKey] {
+            return defId
+        }
+        return id
+    }
+
+    /// Shows the clean API model name (e.g. `DeepSeek-V4.1-Flash` or `Gemini 4 Neon`) without repeating the ID in parentheses.
     public var displayLabel: String {
         if let name = name, !name.isEmpty {
             return name

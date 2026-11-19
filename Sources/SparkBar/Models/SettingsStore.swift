@@ -195,8 +195,10 @@ public final class SettingsStore: ObservableObject {
     public var currentModel: String {
         get {
             if let saved = selectedModels[selectedProvider.rawValue], !saved.isEmpty {
-                // Verify saved model exists in availableModels if availableModels is already loaded
-                if availableModels.isEmpty || availableModels.contains(where: { $0.id == saved }) {
+                // Verify saved model exists in availableModels (directly or as a grouped effort variant)
+                if availableModels.isEmpty || availableModels.contains(where: {
+                    $0.id == saved || ($0.effortVariantModelIds?.values.contains(saved) ?? false)
+                }) {
                     return saved
                 }
             }
@@ -208,12 +210,19 @@ public final class SettingsStore: ObservableObject {
     }
 
     public var currentModelInfo: RemoteModelInfo? {
-        availableModels.first(where: { $0.id == currentModel }) ?? availableModels.first
+        availableModels.first(where: {
+            $0.id == currentModel || ($0.effortVariantModelIds?.values.contains(currentModel) ?? false)
+        }) ?? availableModels.first
+    }
+
+    /// The exact backend model ID to pass to the API or `agy --model`, resolving any grouped effort/variant IDs.
+    public var effectiveModelIdForExecution: String {
+        currentModelInfo?.resolvedModelId(forEffort: reasoningEffort) ?? currentModel
     }
 
     public var supportedEffortLevelsForCurrentModel: [String] {
         guard let info = currentModelInfo else { return [] }
-        var levels: [String] = ["none", "default"]
+        var levels: [String] = (info.effortVariantModelIds != nil) ? ["default"] : ["none", "default"]
         for lvl in info.supportedEffortLevels where !levels.contains(lvl.lowercased()) {
             levels.append(lvl)
         }
@@ -231,11 +240,19 @@ public final class SettingsStore: ObservableObject {
             return "None"
         case "default":
             if let def = currentModelInfo?.defaultEffortLevel, !def.isEmpty {
-                return "Default (\(def.capitalized))"
+                return "Default (\(Self.prettyEffortToken(def)))"
             }
             return "Default"
         default:
-            return level.capitalized
+            return Self.prettyEffortToken(level)
+        }
+    }
+
+    private static func prettyEffortToken(_ token: String) -> String {
+        switch token.lowercased() {
+        case "xhigh": return "XHigh"
+        case "xlow": return "XLow"
+        default: return token.capitalized
         }
     }
 

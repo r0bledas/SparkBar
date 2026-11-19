@@ -406,7 +406,7 @@ public final class ChatViewModel: ObservableObject {
         do {
             try await AGYCLIRunner.shared.streamTurn(
                 prompt: fullPrompt,
-                model: settings.currentModel,
+                model: settings.effectiveModelIdForExecution,
                 conversationId: currentAGYConversationId,
                 allowTools: settings.enableTools,
                 customBinaryPath: settings.agyCustomBinaryPath,
