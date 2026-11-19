@@ -8,6 +8,7 @@ public struct ConversationSession: Identifiable, Codable, Equatable {
     public var updatedAt: Date
     public var provider: String
     public var model: String
+    public var agyConversationId: String?
     public var messages: [ChatMessage]
 
     public init(
@@ -17,6 +18,7 @@ public struct ConversationSession: Identifiable, Codable, Equatable {
         updatedAt: Date = Date(),
         provider: String = "",
         model: String = "",
+        agyConversationId: String? = nil,
         messages: [ChatMessage] = []
     ) {
         self.id = id
@@ -25,6 +27,7 @@ public struct ConversationSession: Identifiable, Codable, Equatable {
         self.updatedAt = updatedAt
         self.provider = provider
         self.model = model
+        self.agyConversationId = agyConversationId
         self.messages = messages
     }
 
@@ -107,7 +110,8 @@ public final class ConversationStore: ObservableObject {
         id: UUID,
         messages: [ChatMessage],
         provider: String,
-        model: String
+        model: String,
+        agyConversationId: String? = nil
     ) {
         // Only persist sessions that have at least one message
         guard !messages.isEmpty else { return }
@@ -120,6 +124,9 @@ public final class ConversationStore: ObservableObject {
             sessions[index].updatedAt = now
             sessions[index].provider = provider
             sessions[index].model = model
+            if let agyId = agyConversationId, !agyId.isEmpty {
+                sessions[index].agyConversationId = agyId
+            }
             sessions[index].messages = messages
         } else {
             let newSession = ConversationSession(
@@ -129,6 +136,7 @@ public final class ConversationStore: ObservableObject {
                 updatedAt: now,
                 provider: provider,
                 model: model,
+                agyConversationId: agyConversationId,
                 messages: messages
             )
             sessions.insert(newSession, at: 0)

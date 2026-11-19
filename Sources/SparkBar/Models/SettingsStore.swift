@@ -9,6 +9,12 @@ public final class SettingsStore: ObservableObject {
     @Published public var selectedProvider: LLMProviderType {
         didSet {
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: "sparkbar.selectedProvider")
+            if let cachedData = UserDefaults.standard.data(forKey: "sparkbar.cachedModels.\(selectedProvider.rawValue)"),
+               let cached = try? JSONDecoder().decode([RemoteModelInfo].self, from: cachedData) {
+                self.availableModels = cached
+            } else {
+                self.availableModels = []
+            }
             Task {
                 await refreshModelsForCurrentProvider()
             }
@@ -116,6 +122,24 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Optional custom path to the `agy` CLI binary (if empty, auto-discovers AGY-Portable, SparkBar bin, or system PATH).
+    @Published public var agyCustomBinaryPath: String {
+        didSet {
+            UserDefaults.standard.set(agyCustomBinaryPath, forKey: "sparkbar.agyCustomBinaryPath")
+        }
+    }
+
+    /// Optional path to an `AGY-Portable` root folder to isolate `$HOME` and read portable Google credentials from `data/home`.
+    @Published public var agyPortableRootPath: String {
+        didSet {
+            UserDefaults.standard.set(agyPortableRootPath, forKey: "sparkbar.agyPortableRootPath")
+        }
+    }
+
+    public var resolvedAGYBinaryPath: String? {
+        AGYCLIRunner.resolveBinaryPath(customPath: agyCustomBinaryPath, portableRoot: agyPortableRootPath)
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         let providerRaw = defaults.string(forKey: "sparkbar.selectedProvider") ?? LLMProviderType.deepseek.rawValue
@@ -152,6 +176,14 @@ public final class SettingsStore: ObservableObject {
         self.openOnStartup = defaults.object(forKey: "sparkbar.openOnStartup") as? Bool ?? false
         self.showMenuBarIcon = defaults.object(forKey: "sparkbar.showMenuBarIcon") as? Bool ?? true
         self.temperature = defaults.object(forKey: "sparkbar.temperature") as? Double ?? 0.3
+        self.agyCustomBinaryPath = defaults.string(forKey: "sparkbar.agyCustomBinaryPath") ?? ""
+        self.agyPortableRootPath = defaults.string(forKey: "sparkbar.agyPortableRootPath") ?? ""
+
+        // Hydrate cached model metadata immediately for zero-flash startup
+        if let cachedData = defaults.data(forKey: "sparkbar.cachedModels.\(self.selectedProvider.rawValue)"),
+           let cached = try? JSONDecoder().decode([RemoteModelInfo].self, from: cachedData) {
+            self.availableModels = cached
+        }
 
         bootstrapLocalKeysIfNeeded()
 
@@ -255,13 +287,24 @@ public final class SettingsStore: ObservableObject {
         defer { isFetchingModels = false }
 
         do {
-            let fetched = try await LLMStreamingClient.fetchRemoteModels(
-                baseURL: baseURL,
-                apiKey: key,
-                provider: provider
-            )
+            let fetched: [RemoteModelInfo]
+            if provider == .antigravity {
+                fetched = try await AGYCLIRunner.fetchAvailableModels(
+                    customPath: agyCustomBinaryPath,
+                    portableRoot: agyPortableRootPath
+                )
+            } else {
+                fetched = try await LLMStreamingClient.fetchRemoteModels(
+                    baseURL: baseURL,
+                    apiKey: key,
+                    provider: provider
+                )
+            }
             if !fetched.isEmpty {
                 self.availableModels = fetched
+                if let encoded = try? JSONEncoder().encode(fetched) {
+                    UserDefaults.standard.set(encoded, forKey: "sparkbar.cachedModels.\(provider.rawValue)")
+                }
                 let existing = selectedModels[provider.rawValue] ?? ""
                 if existing.isEmpty || !fetched.contains(where: { $0.id == existing }) {
                     selectedModels[provider.rawValue] = fetched.first?.id ?? ""

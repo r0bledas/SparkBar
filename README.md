@@ -45,6 +45,10 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
 
 ## ✨ Features
 
+* **Google Antigravity (AGY CLI) Zero-API-Key Provider (`v1.5.0`):**
+  * Use your **Google One / Antigravity** plan directly inside SparkBar with **zero metered API keys**.
+  * Spawns `agy -p ... --output-format stream-json` on-demand per turn and exits cleanly when finished — keeping **0 MB idle RAM** overhead while streaming live responses, tools, and persistent multi-turn conversations (`--conversation <id>`).
+  * Includes 1-click official `agy` binary download in Settings and optional [`AGY-Portable`](https://github.com/r0bledas/AGY-Portable) USB folder isolation.
 * **Standalone Native macOS Settings Window (`⌘ + ,`):**
   * Opens as a real, independent macOS `NSWindow` (`[.titled, .closable, .miniaturizable, .resizable]`) with standard window controls—completely decoupled from the floating prompt panel.
 * **1-Click Self-Update from GitHub:**

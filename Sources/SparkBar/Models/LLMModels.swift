@@ -1,6 +1,7 @@
 import Foundation
 
 public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
+    case antigravity = "antigravity"
     case deepseek = "deepseek"
     case openai = "openai"
     case openrouter = "openrouter"
@@ -14,6 +15,7 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
 
     public var displayName: String {
         switch self {
+        case .antigravity: return "Google Antigravity (AGY)"
         case .deepseek: return "DeepSeek"
         case .openai: return "OpenAI"
         case .openrouter: return "OpenRouter"
@@ -27,6 +29,7 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
 
     public var defaultBaseURL: String {
         switch self {
+        case .antigravity: return "local://agy-cli"
         case .deepseek: return "https://api.deepseek.com/v1"
         case .openai: return "https://api.openai.com/v1"
         case .openrouter: return "https://openrouter.ai/api/v1"
@@ -40,14 +43,14 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
 
     public var requiresAPIKey: Bool {
         switch self {
-        case .ollama: return false
+        case .antigravity, .ollama: return false
         default: return true
         }
     }
 
     public var supportsServerSideWebSearch: Bool {
         switch self {
-        case .deepseek, .openrouter, .openai, .gemini:
+        case .antigravity, .deepseek, .openrouter, .openai, .gemini:
             return true
         default:
             return false
@@ -108,7 +111,7 @@ public struct ToolCallRequest: Identifiable, Codable, Equatable {
     }
 }
 
-public struct ToolExecutionRecord: Identifiable, Codable, Equatable {
+public struct ToolExecutionRecord: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var toolCallId: String
     public var toolName: String

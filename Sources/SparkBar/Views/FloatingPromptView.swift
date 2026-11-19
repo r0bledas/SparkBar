@@ -739,7 +739,7 @@ public struct FloatingPromptView: View {
         if record.toolName == "run_command",
            let data = record.arguments.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let cmd = obj["command"] as? String, !cmd.isEmpty {
+           let cmd = (obj["command"] as? String) ?? (obj["CommandLine"] as? String), !cmd.isEmpty {
             return cmd
         }
         return record.arguments

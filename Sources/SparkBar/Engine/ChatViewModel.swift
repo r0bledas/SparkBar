@@ -28,6 +28,7 @@ public final class ChatViewModel: ObservableObject {
     public let scrollToMessageTrigger = PassthroughSubject<UUID, Never>()
     private var pendingModelSwitchNote: String? = nil
     private var pendingModelId: String? = nil
+    private var currentAGYConversationId: String? = nil
 
     public init() {}
 
@@ -101,6 +102,7 @@ public final class ChatViewModel: ObservableObject {
     public func stopGeneration() {
         currentTask?.cancel()
         currentTask = nil
+        AGYCLIRunner.shared.cancelCurrentProcess()
         isStreaming = false
         activeToolStatus = nil
         persistCurrentSession()
@@ -179,6 +181,7 @@ public final class ChatViewModel: ObservableObject {
         stopGeneration()
         persistCurrentSession()
         currentSessionId = UUID()
+        currentAGYConversationId = nil
         messages.removeAll()
         attachedImages.removeAll()
         errorMessage = nil
@@ -197,6 +200,7 @@ public final class ChatViewModel: ObservableObject {
         stopGeneration()
         persistCurrentSession()
         currentSessionId = session.id
+        currentAGYConversationId = session.agyConversationId
         messages = session.messages
         errorMessage = nil
         showHistory = false
@@ -263,12 +267,19 @@ public final class ChatViewModel: ObservableObject {
             id: currentSessionId,
             messages: meaningfulMessages,
             provider: settings.selectedProvider.rawValue,
-            model: settings.currentModel
+            model: settings.currentModel,
+            agyConversationId: currentAGYConversationId
         )
     }
 
     private func runAgentLoop() async {
         let settings = SettingsStore.shared
+
+        if settings.selectedProvider == .antigravity {
+            await runAGYTurn()
+            return
+        }
+
         let maxToolTurns = 6
         var turnCount = 0
 
@@ -349,6 +360,146 @@ public final class ChatViewModel: ObservableObject {
                 persistCurrentSession()
                 break
             }
+        }
+
+        activeToolStatus = nil
+        isStreaming = false
+        if let queuedModelId = pendingModelId {
+            SettingsStore.shared.currentModel = queuedModelId
+            pendingModelId = nil
+            pendingModelSwitchBanner = nil
+        }
+        persistCurrentSession()
+    }
+
+    /// Executes a single turn via the local `agy` CLI (`--output-format stream-json`),
+    /// streaming tokens and tool calls chronologically with 0 MB idle RAM after the turn ends.
+    private func runAGYTurn() async {
+        let settings = SettingsStore.shared
+        guard let lastUserMsg = messages.last(where: { $0.role == .user }) else {
+            isStreaming = false
+            return
+        }
+
+        var promptParts: [String] = []
+        if let note = lastUserMsg.systemNote, !note.isEmpty {
+            promptParts.append("[System Note: \(note)]")
+        }
+        if !lastUserMsg.attachedImages.isEmpty {
+            let paths = lastUserMsg.attachedImages.compactMap { $0.localFilePath }.filter { !$0.isEmpty }
+            if !paths.isEmpty {
+                promptParts.append("[Attached image file(s) — inspect with view_file if needed: \(paths.joined(separator: ", "))]")
+            }
+        }
+        if !lastUserMsg.content.isEmpty {
+            promptParts.append(lastUserMsg.content)
+        }
+        let fullPrompt = promptParts.joined(separator: "\n\n")
+
+        // Insert initial streaming placeholder
+        let placeholder = ChatMessage(role: .assistant, content: "")
+        messages.append(placeholder)
+        var stepToMessageId: [Int: UUID] = [:]
+        var initialPlaceholderId: UUID? = placeholder.id
+        var sawAnyText = false
+
+        do {
+            try await AGYCLIRunner.shared.streamTurn(
+                prompt: fullPrompt,
+                model: settings.currentModel,
+                conversationId: currentAGYConversationId,
+                allowTools: settings.enableTools,
+                customBinaryPath: settings.agyCustomBinaryPath,
+                portableRoot: settings.agyPortableRootPath,
+                workingDirectory: JobManager.shared.currentWorkingDirectory
+            ) { [weak self] event in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    switch event {
+                    case .initialized(let convId):
+                        self.currentAGYConversationId = convId
+
+                    case .textDelta(let stepIndex, let delta):
+                        sawAnyText = true
+                        self.activeToolStatus = nil
+
+                        if let msgId = stepToMessageId[stepIndex],
+                           let idx = self.messages.firstIndex(where: { $0.id == msgId }) {
+                            self.messages[idx].content += delta
+                        } else if let placeholderId = initialPlaceholderId,
+                                  let idx = self.messages.firstIndex(where: { $0.id == placeholderId }),
+                                  self.messages[idx].content.isEmpty {
+                            self.messages[idx].content = delta
+                            stepToMessageId[stepIndex] = placeholderId
+                            initialPlaceholderId = nil
+                        } else {
+                            let newMsg = ChatMessage(role: .assistant, content: delta)
+                            self.messages.append(newMsg)
+                            stepToMessageId[stepIndex] = newMsg.id
+                        }
+
+                    case .toolStarted(_, let toolName, _):
+                        // Remove unused empty placeholder if the model went straight into a tool call
+                        if let placeholderId = initialPlaceholderId,
+                           let idx = self.messages.firstIndex(where: { $0.id == placeholderId }),
+                           self.messages[idx].content.isEmpty {
+                            self.messages.remove(at: idx)
+                            initialPlaceholderId = nil
+                        }
+                        self.activeToolStatus = "Running \(toolName)..."
+
+                    case .toolCompleted(_, let record):
+                        self.activeToolStatus = nil
+                        if let placeholderId = initialPlaceholderId,
+                           let idx = self.messages.firstIndex(where: { $0.id == placeholderId }),
+                           self.messages[idx].content.isEmpty {
+                            self.messages.remove(at: idx)
+                            initialPlaceholderId = nil
+                        }
+                        let toolMsg = ChatMessage(
+                            role: .tool,
+                            content: record.output,
+                            toolCallId: record.toolCallId,
+                            toolName: record.toolName,
+                            toolRecords: [record]
+                        )
+                        self.messages.append(toolMsg)
+                        self.persistCurrentSession()
+
+                    case .finished(let convId, let finalResponse, _):
+                        if let convId = convId, !convId.isEmpty {
+                            self.currentAGYConversationId = convId
+                        }
+                        if !sawAnyText, let response = finalResponse, !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            if let placeholderId = initialPlaceholderId,
+                               let idx = self.messages.firstIndex(where: { $0.id == placeholderId }) {
+                                self.messages[idx].content = response
+                                initialPlaceholderId = nil
+                            } else {
+                                self.messages.append(ChatMessage(role: .assistant, content: response))
+                            }
+                        }
+                        self.persistCurrentSession()
+                    }
+                }
+            }
+        } catch is CancellationError {
+            persistCurrentSession()
+        } catch {
+            if let placeholderId = initialPlaceholderId,
+               let idx = messages.firstIndex(where: { $0.id == placeholderId }),
+               messages[idx].content.isEmpty {
+                messages.remove(at: idx)
+            }
+            errorMessage = error.localizedDescription
+            persistCurrentSession()
+        }
+
+        // Clean up any trailing empty placeholder
+        if let placeholderId = initialPlaceholderId,
+           let idx = messages.firstIndex(where: { $0.id == placeholderId }),
+           messages[idx].content.isEmpty {
+            messages.remove(at: idx)
         }
 
         activeToolStatus = nil

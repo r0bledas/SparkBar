@@ -343,4 +343,51 @@ final class SparkBarTests: XCTestCase {
         vm.removeAttachedImage(id: idToRemove)
         XCTAssertFalse(vm.attachedImages.contains(where: { $0.id == idToRemove }))
     }
+
+    func testAGYCLIRunnerParsingAndLiveDiscovery() async throws {
+        // 1. Verify `agy models` parser handles spinner carriage returns and extracts ID + display name
+        let sampleModels = """
+        \r⠋ Fetching available models...\r⠙ Fetching available models...\rgemini-4-neon-high              Gemini 4 Neon (High)
+        claude-sonnet-5-5-medium        Claude Sonnet 5.5 (Medium)
+        gpt-oss-120b-medium             GPT-OSS 120B (Medium)
+        """
+        let parsedModels = AGYCLIRunner.parseModelsOutput(sampleModels)
+        XCTAssertEqual(parsedModels.count, 3)
+        XCTAssertEqual(parsedModels[0].id, "gemini-4-neon-high")
+        XCTAssertEqual(parsedModels[0].displayLabel, "Gemini 4 Neon (High)")
+        XCTAssertEqual(parsedModels[1].id, "claude-sonnet-5-5-medium")
+
+        // 2. Verify NDJSON stream parser for init, text_delta, tool ACTIVE/DONE, and result
+        let initLine = #"{"event":"init","conversation_id":"conv-123"}"#
+        if case .initialized(let convId) = AGYCLIRunner.parseNDJSONLine(initLine) {
+            XCTAssertEqual(convId, "conv-123")
+        } else {
+            XCTFail("Failed to parse init event")
+        }
+
+        let deltaLine = #"{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello!"}}"#
+        if case .textDelta(let idx, let delta) = AGYCLIRunner.parseNDJSONLine(deltaLine) {
+            XCTAssertEqual(idx, 1)
+            XCTAssertEqual(delta, "Hello!")
+        } else {
+            XCTFail("Failed to parse text_delta event")
+        }
+
+        let toolDoneLine = #"{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","duration_seconds":0.08,"tool_info":{"name":"run_command","parameters":{"CommandLine":"echo hi"},"output":"hi\n"}}}"#
+        if case .toolCompleted(let idx, let record) = AGYCLIRunner.parseNDJSONLine(toolDoneLine) {
+            XCTAssertEqual(idx, 2)
+            XCTAssertEqual(record.toolName, "run_command")
+            XCTAssertEqual(record.durationMs, 80)
+            XCTAssertTrue(record.arguments.contains("echo hi"))
+            XCTAssertEqual(record.output, "hi\n")
+        } else {
+            XCTFail("Failed to parse tool DONE event")
+        }
+
+        // 3. Verify live `agy models` discovery if binary is present in sandbox
+        if AGYCLIRunner.resolveBinaryPath() != nil {
+            let liveModels = try await AGYCLIRunner.fetchAvailableModels()
+            XCTAssertFalse(liveModels.isEmpty, "Expected live agy models list to be non-empty")
+        }
+    }
 }

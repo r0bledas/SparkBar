@@ -59,6 +59,8 @@ public struct SettingsSheetView: View {
     @State private var modelInput: String = ""
     @State private var baseURLInput: String = ""
     @State private var showSavedToast: Bool = false
+    @State private var isDownloadingAGY: Bool = false
+    @State private var agyDownloadStatus: String = ""
 
     public init() {}
 
@@ -115,6 +117,86 @@ public struct SettingsSheetView: View {
                         Toggle("Show AI Provider picker in the main floating bar", isOn: $settings.showProviderInMainBar)
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
+                    }
+
+                    // Google Antigravity (AGY CLI) Zero-API-Key Setup Card
+                    if settings.selectedProvider == .antigravity {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Google Antigravity (AGY CLI) — Google One Plan")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                if settings.resolvedAGYBinaryPath != nil {
+                                    Label("AGY CLI Ready (0 MB Idle)", systemImage: "checkmark.seal.fill")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Label("Binary Not Found", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+
+                            Text("Uses your authenticated Google One / Antigravity login—no metered API key required. Spawns `agy` on-demand per turn and exits immediately (0 MB idle RAM).")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+
+                            if let binPath = settings.resolvedAGYBinaryPath {
+                                Text("Binary: \(binPath)")
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+
+                            HStack(spacing: 8) {
+                                Button {
+                                    downloadAGYBinary()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if isDownloadingAGY {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "arrow.down.circle.fill")
+                                        }
+                                        Text(isDownloadingAGY ? "Downloading AGY CLI…" : (settings.resolvedAGYBinaryPath == nil ? "Download AGY CLI" : "Re-download / Update AGY CLI"))
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                }
+                                .disabled(isDownloadingAGY)
+
+                                Button("Refresh AGY Models") {
+                                    Task {
+                                        await settings.refreshModelsForCurrentProvider()
+                                        modelInput = settings.currentModel
+                                    }
+                                }
+                                .disabled(isDownloadingAGY || settings.isFetchingModels)
+                            }
+
+                            if !agyDownloadStatus.isEmpty {
+                                Text(agyDownloadStatus)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Optional AGY-Portable Folder (leave blank to use host ~/.gemini login)")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                TextField("/Volumes/USB/AGY-Portable (optional)", text: $settings.agyPortableRootPath)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 11.5, design: .monospaced))
+                            }
+                            .padding(.top, 2)
+                        }
+                        .padding(12)
+                        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.75)
+                        )
                     }
 
                     // API Key Field
@@ -206,31 +288,33 @@ public struct SettingsSheetView: View {
                         }
                     }
 
-                    // Endpoint URL
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("API Base URL")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Reset Default") {
-                                baseURLInput = settings.selectedProvider.defaultBaseURL
-                                settings.currentBaseURL = baseURLInput
-                                Task {
-                                    await settings.refreshModelsForCurrentProvider()
-                                    modelInput = settings.currentModel
+                    // Endpoint URL (not needed for local AGY CLI)
+                    if settings.selectedProvider != .antigravity {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("API Base URL")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Reset Default") {
+                                    baseURLInput = settings.selectedProvider.defaultBaseURL
+                                    settings.currentBaseURL = baseURLInput
+                                    Task {
+                                        await settings.refreshModelsForCurrentProvider()
+                                        modelInput = settings.currentModel
+                                    }
                                 }
+                                .buttonStyle(.link)
+                                .font(.system(size: 11))
                             }
-                            .buttonStyle(.link)
-                            .font(.system(size: 11))
-                        }
 
-                        TextField("https://api.deepseek.com/v1", text: $baseURLInput)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                            .onChange(of: baseURLInput) { _, newValue in
-                                settings.currentBaseURL = newValue
-                            }
+                            TextField("https://api.deepseek.com/v1", text: $baseURLInput)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                                .onChange(of: baseURLInput) { _, newValue in
+                                    settings.currentBaseURL = newValue
+                                }
+                        }
                     }
 
                     Divider()
@@ -366,14 +450,40 @@ public struct SettingsSheetView: View {
     }
 
     private func saveCurrentProviderFields() {
-        settings.setAPIKey(apiKeyInput, for: settings.selectedProvider)
+        if settings.selectedProvider.requiresAPIKey {
+            settings.setAPIKey(apiKeyInput, for: settings.selectedProvider)
+        }
         if !modelInput.isEmpty {
             settings.currentModel = modelInput
         }
-        settings.currentBaseURL = baseURLInput
+        if settings.selectedProvider != .antigravity {
+            settings.currentBaseURL = baseURLInput
+        }
         showSavedToast = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             showSavedToast = false
+        }
+    }
+
+    private func downloadAGYBinary() {
+        guard !isDownloadingAGY else { return }
+        isDownloadingAGY = true
+        agyDownloadStatus = "Starting download…"
+        Task { @MainActor in
+            do {
+                let path = try await AGYCLIRunner.downloadOfficialBinary { progress in
+                    Task { @MainActor in
+                        agyDownloadStatus = progress
+                    }
+                }
+                agyDownloadStatus = "Installed at \(path). Fetching models…"
+                await settings.refreshModelsForCurrentProvider()
+                modelInput = settings.currentModel
+                agyDownloadStatus = "Ready! Loaded \(settings.availableModels.count) models."
+            } catch {
+                agyDownloadStatus = "Error: \(error.localizedDescription)"
+            }
+            isDownloadingAGY = false
         }
     }
 }
