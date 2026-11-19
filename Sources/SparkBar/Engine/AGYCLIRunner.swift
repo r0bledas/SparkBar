@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// Events emitted live from `agy --output-format stream-json`.
 public enum AGYStreamEvent: Sendable {
@@ -713,25 +714,54 @@ public final class AGYAccountManager: ObservableObject {
         echo "======================================================"
         echo "  SparkBar — Sign In to Google Antigravity (\(profileName))"
         echo "======================================================"
-        echo "Complete Google sign-in in your browser, then press Ctrl+C or exit once signed in."
+        echo "Complete Google sign-in in your browser."
+        echo "This window will close automatically once signed in."
         echo ""
         mkdir -p "\(tempHome.path)/.gemini"
-        HOME="\(tempHome.path)" "\(binaryPath)"
-        if [ -f "\(tempToken.path)" ]; then
+
+        # Background token watcher: the instant agy writes the OAuth token, kill the foreground agy
+        # process so the user is never stuck inside the interactive CLI TUI, save the profile, and close Terminal.
+        MAIN_SHELL_PID=$$
+        (
+            while [ ! -s "\(tempToken.path)" ]; do
+                sleep 0.25
+            done
+            sleep 0.4
             mkdir -p "\(destDir.path)" "\(paths.liveTokenURL.deletingLastPathComponent().path)"
             cp -f "\(tempToken.path)" "\(destToken.path)"
             chmod 600 "\(destToken.path)"
             cp -f "\(tempToken.path)" "\(paths.liveTokenURL.path)"
             chmod 600 "\(paths.liveTokenURL.path)"
             printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
-            echo ""
-            echo "[Success] Saved account '\(profileName)' and activated it in SparkBar!"
-        else
-            echo ""
-            echo "[Notice] No new login token was detected."
+            pkill -TERM -P "$MAIN_SHELL_PID" -f "\(binaryPath)" 2>/dev/null || true
+            sleep 0.25
+            pkill -KILL -P "$MAIN_SHELL_PID" -f "\(binaryPath)" 2>/dev/null || true
+        ) &
+        WATCHER_PID=$!
+
+        # Run agy in the FOREGROUND so it owns the TTY if the user needs to paste an OAuth code
+        HOME="\(tempHome.path)" "\(binaryPath)" || true
+        kill "$WATCHER_PID" 2>/dev/null || true
+
+        # Fallback save if token appeared right as user exited manually
+        if [ -s "\(tempToken.path)" ] && [ ! -s "\(destToken.path)" ]; then
+            mkdir -p "\(destDir.path)" "\(paths.liveTokenURL.deletingLastPathComponent().path)"
+            cp -f "\(tempToken.path)" "\(destToken.path)"
+            chmod 600 "\(destToken.path)"
+            cp -f "\(tempToken.path)" "\(paths.liveTokenURL.path)"
+            chmod 600 "\(paths.liveTokenURL.path)"
+            printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
         fi
+
         rm -rf "\(tempHome.path)"
         rm -f "\(scriptURL.path)"
+
+        # Close this Terminal window automatically and return focus to SparkBar
+        CURRENT_TTY=$(tty 2>/dev/null || true)
+        if [ -n "$CURRENT_TTY" ]; then
+            osascript -e "tell application \\"Terminal\\" to close (every window whose tty of selected tab is \\"$CURRENT_TTY\\")" >/dev/null 2>&1 &
+        fi
+        exit 0
         """
 
         try? script.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -743,13 +773,14 @@ public final class AGYAccountManager: ObservableObject {
         openProc.arguments = ["-a", "Terminal", scriptURL.path]
         try? openProc.run()
 
-        // Poll briefly in background so SparkBar refreshes automatically once login completes
+        // Poll briefly in background so SparkBar refreshes and regains focus automatically once login completes
         Task { @MainActor in
-            for _ in 0..<120 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            for _ in 0..<240 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 if fm.fileExists(atPath: destToken.path) {
                     self.reload(portableRoot: root)
                     await SettingsStore.shared.refreshModelsForCurrentProvider()
+                    NSApp.activate(ignoringOtherApps: true)
                     if !fm.fileExists(atPath: scriptURL.path) {
                         break
                     }
