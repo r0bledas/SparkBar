@@ -108,6 +108,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // If launched manually by the user, show the floating bar right away.
         if !wasLaunchedAtStartup(notification) {
             PanelController.shared.showPanel()
+            // On manual launch, if AGY is selected but binary or Google login isn't set up yet, open Settings to guide setup
+            if SettingsStore.shared.selectedProvider == .antigravity {
+                AGYAccountManager.shared.reload()
+                if SettingsStore.shared.resolvedAGYBinaryPath == nil || !AGYAccountManager.shared.isSignedIn {
+                    SettingsWindowController.shared.showWindow()
+                }
+            }
         }
     }
 

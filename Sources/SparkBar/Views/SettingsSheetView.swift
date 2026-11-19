@@ -55,12 +55,14 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 public struct SettingsSheetView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var updater = GitHubUpdater.shared
+    @ObservedObject private var agyAccounts = AGYAccountManager.shared
     @State private var apiKeyInput: String = ""
-    @State private var modelInput: String = ""
     @State private var baseURLInput: String = ""
     @State private var showSavedToast: Bool = false
     @State private var isDownloadingAGY: Bool = false
     @State private var agyDownloadStatus: String = ""
+    @State private var isAddingAccount: Bool = false
+    @State private var newAccountName: String = ""
 
     public init() {}
 
@@ -119,35 +121,114 @@ public struct SettingsSheetView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // Compact Google Antigravity (AGY CLI) Status Row
+                    // Compact Google Antigravity (AGY CLI) All-in-One Card
                     if settings.selectedProvider == .antigravity {
-                        VStack(alignment: .leading, spacing: 6) {
+                        let hasBin = settings.resolvedAGYBinaryPath != nil
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 8) {
-                                if settings.resolvedAGYBinaryPath != nil {
-                                    Label("AGY CLI Ready", systemImage: "checkmark.seal.fill")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.green)
-                                } else {
-                                    Label("AGY CLI Not Installed", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.orange)
-                                }
+                                Circle()
+                                    .fill(hasBin && agyAccounts.isSignedIn ? Color.green : Color.orange)
+                                    .frame(width: 8, height: 8)
+                                Text(hasBin ? (agyAccounts.isSignedIn ? "AGY CLI Ready" : "Sign In Required") : "AGY CLI Not Installed")
+                                    .font(.system(size: 12.5, weight: .medium))
 
                                 Spacer()
 
-                                Button {
-                                    downloadAGYBinary()
-                                } label: {
-                                    HStack(spacing: 5) {
-                                        if isDownloadingAGY {
-                                            ProgressView().controlSize(.small)
+                                if !hasBin {
+                                    Button {
+                                        downloadAndPromptLogin()
+                                    } label: {
+                                        HStack(spacing: 5) {
+                                            if isDownloadingAGY { ProgressView().controlSize(.small) }
+                                            Text(isDownloadingAGY ? "Downloading…" : "Download & Sign In")
+                                                .font(.system(size: 11.5, weight: .medium))
                                         }
-                                        Text(isDownloadingAGY ? "Downloading…" : (settings.resolvedAGYBinaryPath == nil ? "Download CLI" : "Update CLI"))
-                                            .font(.system(size: 11.5))
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(isDownloadingAGY)
+                                } else if !agyAccounts.isSignedIn {
+                                    Button("Sign In with Google") {
+                                        if let bin = settings.resolvedAGYBinaryPath {
+                                            agyAccounts.launchLoginInTerminal(accountName: "default", binaryPath: bin)
+                                        }
+                                    }
+                                    .controlSize(.small)
+                                } else {
+                                    Button {
+                                        downloadAGYBinary()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            if isDownloadingAGY { ProgressView().controlSize(.small) }
+                                            Text(isDownloadingAGY ? "Updating…" : "Update CLI")
+                                                .font(.system(size: 11))
+                                        }
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(isDownloadingAGY)
+                                }
+                            }
+
+                            if hasBin {
+                                HStack(spacing: 8) {
+                                    Text("Account")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+
+                                    if !agyAccounts.accounts.isEmpty {
+                                        Picker("Account", selection: Binding(
+                                            get: { agyAccounts.activeAccount },
+                                            set: { agyAccounts.switchAccount(to: $0) }
+                                        )) {
+                                            ForEach(agyAccounts.accounts, id: \.self) { name in
+                                                Text(name).tag(name)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .pickerStyle(.menu)
+                                        .frame(maxWidth: 180)
+                                    } else {
+                                        Text("None")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Button {
+                                        isAddingAccount.toggle()
+                                        newAccountName = ""
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .controlSize(.small)
+                                    .help("Add another Google account")
+
+                                    if agyAccounts.accounts.count > 1, !agyAccounts.activeAccount.isEmpty {
+                                        Button {
+                                            agyAccounts.removeAccount(named: agyAccounts.activeAccount)
+                                        } label: {
+                                            Image(systemName: "minus")
+                                                .font(.system(size: 11, weight: .semibold))
+                                        }
+                                        .controlSize(.small)
+                                        .help("Remove selected account")
                                     }
                                 }
-                                .controlSize(.small)
-                                .disabled(isDownloadingAGY)
+
+                                if isAddingAccount {
+                                    HStack(spacing: 6) {
+                                        TextField("Account name (e.g. school, personal)", text: $newAccountName)
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.system(size: 11.5))
+                                            .onSubmit { triggerAddAccountLogin() }
+                                        Button("Sign In") {
+                                            triggerAddAccountLogin()
+                                        }
+                                        .controlSize(.small)
+                                        .disabled(newAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                    }
+                                }
                             }
 
                             if !agyDownloadStatus.isEmpty {
@@ -156,15 +237,24 @@ public struct SettingsSheetView: View {
                                     .foregroundStyle(.secondary)
                             }
 
-                            DisclosureGroup("AGY-Portable Path (Optional)") {
+                            DisclosureGroup("AGY-Portable Folder (Optional)") {
                                 TextField("/Volumes/USB/AGY-Portable", text: $settings.agyPortableRootPath)
                                     .textFieldStyle(.roundedBorder)
                                     .font(.system(size: 11.5, design: .monospaced))
                                     .padding(.top, 4)
+                                    .onChange(of: settings.agyPortableRootPath) { _, newVal in
+                                        agyAccounts.reload(portableRoot: newVal)
+                                    }
                             }
-                            .font(.system(size: 11.5))
+                            .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                         }
+                        .padding(12)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
+                        )
                     }
 
                     // API Key Field
@@ -176,7 +266,7 @@ public struct SettingsSheetView: View {
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 if !apiKeyInput.isEmpty {
-                                    Label("Key Configured", systemImage: "checkmark.seal.fill")
+                                    Text("Configured")
                                         .font(.system(size: 11, weight: .medium))
                                         .foregroundStyle(.green)
                                 }
@@ -190,69 +280,10 @@ public struct SettingsSheetView: View {
                                         saveCurrentProviderFields()
                                     }
 
-                                Button("Save & Fetch Models") {
+                                Button("Save") {
                                     saveCurrentProviderFields()
                                 }
                             }
-                        }
-                    }
-
-                    // Dynamic Model Selection
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Model")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button {
-                                Task {
-                                    await settings.refreshModelsForCurrentProvider()
-                                    modelInput = settings.currentModel
-                                }
-                            } label: {
-                                Label(settings.isFetchingModels ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
-                                    .font(.system(size: 11))
-                            }
-                            .buttonStyle(.link)
-                        }
-
-                        HStack(spacing: 8) {
-                            TextField("Model ID", text: $modelInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12, design: .monospaced))
-                                .onChange(of: modelInput) { _, newValue in
-                                    settings.currentModel = newValue
-                                }
-
-                            if !settings.availableModels.isEmpty {
-                                Menu("Models (\(settings.availableModels.count))") {
-                                    ForEach(settings.availableModels) { m in
-                                        Button(m.displayLabel) {
-                                            modelInput = m.id
-                                            settings.currentModel = m.id
-                                        }
-                                    }
-                                }
-                                .frame(width: 140)
-                            }
-                        }
-                    }
-
-                    // Reasoning Effort / Variant Level
-                    let levels = settings.supportedEffortLevelsForCurrentModel
-                    if !levels.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Thinking Effort")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-
-                            Picker("Thinking Effort", selection: $settings.reasoningEffort) {
-                                ForEach(levels, id: \.self) { level in
-                                    Text(settings.effortDisplayLabel(for: level)).tag(level)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
                         }
                     }
 
@@ -269,7 +300,6 @@ public struct SettingsSheetView: View {
                                     settings.currentBaseURL = baseURLInput
                                     Task {
                                         await settings.refreshModelsForCurrentProvider()
-                                        modelInput = settings.currentModel
                                     }
                                 }
                                 .buttonStyle(.link)
@@ -408,21 +438,18 @@ public struct SettingsSheetView: View {
         .frame(minWidth: 520, idealWidth: 580, maxWidth: .infinity, minHeight: 520, idealHeight: 620, maxHeight: .infinity)
         .onAppear {
             loadFields(for: settings.selectedProvider)
+            agyAccounts.reload()
         }
     }
 
     private func loadFields(for provider: LLMProviderType) {
         apiKeyInput = settings.apiKey(for: provider)
-        modelInput = settings.currentModel
         baseURLInput = settings.customEndpoints[provider.rawValue] ?? provider.defaultBaseURL
     }
 
     private func saveCurrentProviderFields() {
         if settings.selectedProvider.requiresAPIKey {
             settings.setAPIKey(apiKeyInput, for: settings.selectedProvider)
-        }
-        if !modelInput.isEmpty {
-            settings.currentModel = modelInput
         }
         if settings.selectedProvider != .antigravity {
             settings.currentBaseURL = baseURLInput
@@ -433,21 +460,49 @@ public struct SettingsSheetView: View {
         }
     }
 
-    private func downloadAGYBinary() {
+    private func triggerAddAccountLogin() {
+        let name = newAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let bin = settings.resolvedAGYBinaryPath else { return }
+        isAddingAccount = false
+        newAccountName = ""
+        agyAccounts.launchLoginInTerminal(accountName: name, binaryPath: bin)
+    }
+
+    private func downloadAndPromptLogin() {
         guard !isDownloadingAGY else { return }
         isDownloadingAGY = true
-        agyDownloadStatus = "Starting download…"
+        agyDownloadStatus = "Downloading AGY CLI…"
         Task { @MainActor in
             do {
                 let path = try await AGYCLIRunner.downloadOfficialBinary { progress in
-                    Task { @MainActor in
-                        agyDownloadStatus = progress
-                    }
+                    Task { @MainActor in agyDownloadStatus = progress }
                 }
-                agyDownloadStatus = "Installed at \(path). Fetching models…"
+                agyAccounts.reload()
+                if !agyAccounts.isSignedIn {
+                    agyDownloadStatus = "Installed! Opening Google sign-in…"
+                    agyAccounts.launchLoginInTerminal(accountName: "default", binaryPath: path)
+                } else {
+                    await settings.refreshModelsForCurrentProvider()
+                    agyDownloadStatus = "Ready (\(settings.availableModels.count) models)."
+                }
+            } catch {
+                agyDownloadStatus = "Error: \(error.localizedDescription)"
+            }
+            isDownloadingAGY = false
+        }
+    }
+
+    private func downloadAGYBinary() {
+        guard !isDownloadingAGY else { return }
+        isDownloadingAGY = true
+        agyDownloadStatus = "Updating AGY CLI…"
+        Task { @MainActor in
+            do {
+                _ = try await AGYCLIRunner.downloadOfficialBinary { progress in
+                    Task { @MainActor in agyDownloadStatus = progress }
+                }
                 await settings.refreshModelsForCurrentProvider()
-                modelInput = settings.currentModel
-                agyDownloadStatus = "Ready! Loaded \(settings.availableModels.count) models."
+                agyDownloadStatus = "Updated (\(settings.availableModels.count) models)."
             } catch {
                 agyDownloadStatus = "Error: \(error.localizedDescription)"
             }

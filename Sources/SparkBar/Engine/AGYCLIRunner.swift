@@ -575,3 +575,215 @@ public final class AGYCLIRunner: @unchecked Sendable {
         }
     }
 }
+
+/// Manages multiple Google Antigravity (AGY) OAuth account profiles using the exact same
+/// `accounts/<name>/token` + `.active` layout as `AGY-Portable`, sharing credentials seamlessly
+/// when an `AGY-Portable` folder is configured or storing them in `~/Library/Application Support/SparkBar/agy-accounts/`.
+@MainActor
+public final class AGYAccountManager: ObservableObject {
+    public static let shared = AGYAccountManager()
+
+    @Published public private(set) var accounts: [String] = []
+    @Published public private(set) var activeAccount: String = ""
+    @Published public private(set) var isSignedIn: Bool = false
+
+    private init() {
+        reload()
+    }
+
+    private func resolvedPaths(portableRoot: String) -> (accountsDir: URL, activeFile: URL, liveTokenURL: URL) {
+        let fm = FileManager.default
+        let trimmed = portableRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            let root = URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath, isDirectory: true)
+            let dataRoot = root.appendingPathComponent("data", isDirectory: true)
+            let accountsDir = dataRoot.appendingPathComponent("accounts", isDirectory: true)
+            let activeFile = accountsDir.appendingPathComponent(".active")
+            let liveToken = dataRoot
+                .appendingPathComponent("home", isDirectory: true)
+                .appendingPathComponent(".gemini", isDirectory: true)
+                .appendingPathComponent("jetski-standalone-oauth-token")
+            return (accountsDir, activeFile, liveToken)
+        }
+
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
+        let accountsDir = appSupport
+            .appendingPathComponent("SparkBar", isDirectory: true)
+            .appendingPathComponent("agy-accounts", isDirectory: true)
+        let activeFile = accountsDir.appendingPathComponent(".active")
+        let liveToken = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent(".gemini", isDirectory: true)
+            .appendingPathComponent("jetski-standalone-oauth-token")
+        return (accountsDir, activeFile, liveToken)
+    }
+
+    public func reload(portableRoot: String? = nil) {
+        let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
+        let paths = resolvedPaths(portableRoot: root)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
+
+        let liveExists = fm.fileExists(atPath: paths.liveTokenURL.path)
+        var discovered = listAccountNames(in: paths.accountsDir)
+
+        // Auto-migrate existing host/portable login into "default" profile if none saved yet
+        if liveExists && discovered.isEmpty {
+            storeToken(from: paths.liveTokenURL, as: "default", in: paths.accountsDir)
+            writeActive("default", to: paths.activeFile)
+            discovered = ["default"]
+        }
+
+        let active = readActive(from: paths.activeFile)
+        self.accounts = discovered
+        self.activeAccount = (!active.isEmpty && discovered.contains(active)) ? active : (discovered.first ?? "")
+        self.isSignedIn = liveExists || !discovered.isEmpty
+    }
+
+    public func switchAccount(to name: String, portableRoot: String? = nil) {
+        let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
+        let paths = resolvedPaths(portableRoot: root)
+        let fm = FileManager.default
+
+        let targetToken = paths.accountsDir.appendingPathComponent(name, isDirectory: true).appendingPathComponent("token")
+        guard fm.fileExists(atPath: targetToken.path) else { return }
+
+        // Persist any refreshed live token back into the previously active profile before swapping
+        if !activeAccount.isEmpty && fm.fileExists(atPath: paths.liveTokenURL.path) {
+            storeToken(from: paths.liveTokenURL, as: activeAccount, in: paths.accountsDir)
+        }
+
+        // Load selected profile token into the live slot
+        let geminiDir = paths.liveTokenURL.deletingLastPathComponent()
+        try? fm.createDirectory(at: geminiDir, withIntermediateDirectories: true)
+        try? fm.removeItem(at: paths.liveTokenURL)
+        try? fm.copyItem(at: targetToken, to: paths.liveTokenURL)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: paths.liveTokenURL.path)
+
+        writeActive(name, to: paths.activeFile)
+        reload(portableRoot: root)
+
+        Task {
+            await SettingsStore.shared.refreshModelsForCurrentProvider()
+        }
+    }
+
+    public func removeAccount(named name: String, portableRoot: String? = nil) {
+        let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
+        let paths = resolvedPaths(portableRoot: root)
+        let fm = FileManager.default
+        let dir = paths.accountsDir.appendingPathComponent(name, isDirectory: true)
+        try? fm.removeItem(at: dir)
+        if activeAccount == name {
+            try? fm.removeItem(at: paths.activeFile)
+        }
+        reload(portableRoot: root)
+        if !activeAccount.isEmpty {
+            switchAccount(to: activeAccount, portableRoot: root)
+        }
+    }
+
+    /// Launches `agy` in Terminal.app with an isolated temp `$HOME` so the user can complete Google OAuth
+    /// for a new (or re-authenticated) profile without disrupting the currently active account.
+    public func launchLoginInTerminal(accountName rawName: String, binaryPath: String, portableRoot: String? = nil) {
+        let cleanName = rawName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
+        let profileName = cleanName.isEmpty ? "default" : cleanName
+
+        let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
+        let paths = resolvedPaths(portableRoot: root)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
+
+        // Sync current active token back first
+        if !activeAccount.isEmpty && fm.fileExists(atPath: paths.liveTokenURL.path) {
+            storeToken(from: paths.liveTokenURL, as: activeAccount, in: paths.accountsDir)
+        }
+
+        let tempHome = fm.temporaryDirectory.appendingPathComponent("sparkbar_agy_login_\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let tempToken = tempHome.appendingPathComponent(".gemini/jetski-standalone-oauth-token")
+        let destDir = paths.accountsDir.appendingPathComponent(profileName, isDirectory: true)
+        let destToken = destDir.appendingPathComponent("token")
+        let scriptURL = fm.temporaryDirectory.appendingPathComponent("sparkbar_agy_login_\(UUID().uuidString.prefix(8)).command")
+
+        let script = """
+        #!/usr/bin/env bash
+        clear
+        echo "======================================================"
+        echo "  SparkBar — Sign In to Google Antigravity (\(profileName))"
+        echo "======================================================"
+        echo "Complete Google sign-in in your browser, then press Ctrl+C or exit once signed in."
+        echo ""
+        mkdir -p "\(tempHome.path)/.gemini"
+        HOME="\(tempHome.path)" "\(binaryPath)"
+        if [ -f "\(tempToken.path)" ]; then
+            mkdir -p "\(destDir.path)" "\(paths.liveTokenURL.deletingLastPathComponent().path)"
+            cp -f "\(tempToken.path)" "\(destToken.path)"
+            chmod 600 "\(destToken.path)"
+            cp -f "\(tempToken.path)" "\(paths.liveTokenURL.path)"
+            chmod 600 "\(paths.liveTokenURL.path)"
+            printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
+            echo ""
+            echo "[Success] Saved account '\(profileName)' and activated it in SparkBar!"
+        else
+            echo ""
+            echo "[Notice] No new login token was detected."
+        fi
+        rm -rf "\(tempHome.path)"
+        rm -f "\(scriptURL.path)"
+        """
+
+        try? script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        // Open the login helper in Terminal.app
+        let openProc = Process()
+        openProc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        openProc.arguments = ["-a", "Terminal", scriptURL.path]
+        try? openProc.run()
+
+        // Poll briefly in background so SparkBar refreshes automatically once login completes
+        Task { @MainActor in
+            for _ in 0..<120 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if fm.fileExists(atPath: destToken.path) {
+                    self.reload(portableRoot: root)
+                    await SettingsStore.shared.refreshModelsForCurrentProvider()
+                    if !fm.fileExists(atPath: scriptURL.path) {
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private func listAccountNames(in dir: URL) -> [String] {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        return items.compactMap { url in
+            let tokenFile = url.appendingPathComponent("token")
+            return fm.fileExists(atPath: tokenFile.path) ? url.lastPathComponent : nil
+        }.sorted()
+    }
+
+    private func storeToken(from source: URL, as name: String, in accountsDir: URL) {
+        let fm = FileManager.default
+        let destDir = accountsDir.appendingPathComponent(name, isDirectory: true)
+        let destToken = destDir.appendingPathComponent("token")
+        try? fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+        try? fm.removeItem(at: destToken)
+        try? fm.copyItem(at: source, to: destToken)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destToken.path)
+    }
+
+    private func readActive(from activeFile: URL) -> String {
+        guard let str = try? String(contentsOf: activeFile, encoding: .utf8) else { return "" }
+        return str.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func writeActive(_ name: String, to activeFile: URL) {
+        let content = "\(name)\r\n"
+        try? content.write(to: activeFile, atomically: true, encoding: .utf8)
+    }
+}
