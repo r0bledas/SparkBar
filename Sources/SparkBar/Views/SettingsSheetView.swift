@@ -119,60 +119,35 @@ public struct SettingsSheetView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    // Google Antigravity (AGY CLI) Zero-API-Key Setup Card
+                    // Compact Google Antigravity (AGY CLI) Status Row
                     if settings.selectedProvider == .antigravity {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Google Antigravity (AGY CLI) — Google One Plan")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
                                 if settings.resolvedAGYBinaryPath != nil {
-                                    Label("AGY CLI Ready (0 MB Idle)", systemImage: "checkmark.seal.fill")
-                                        .font(.system(size: 11, weight: .medium))
+                                    Label("AGY CLI Ready", systemImage: "checkmark.seal.fill")
+                                        .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(.green)
                                 } else {
-                                    Label("Binary Not Found", systemImage: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 11, weight: .medium))
+                                    Label("AGY CLI Not Installed", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 12, weight: .medium))
                                         .foregroundStyle(.orange)
                                 }
-                            }
 
-                            Text("Uses your authenticated Google One / Antigravity login—no metered API key required. Spawns `agy` on-demand per turn and exits immediately (0 MB idle RAM).")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.secondary)
+                                Spacer()
 
-                            if let binPath = settings.resolvedAGYBinaryPath {
-                                Text("Binary: \(binPath)")
-                                    .font(.system(size: 10.5, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-
-                            HStack(spacing: 8) {
                                 Button {
                                     downloadAGYBinary()
                                 } label: {
-                                    HStack(spacing: 6) {
+                                    HStack(spacing: 5) {
                                         if isDownloadingAGY {
                                             ProgressView().controlSize(.small)
-                                        } else {
-                                            Image(systemName: "arrow.down.circle.fill")
                                         }
-                                        Text(isDownloadingAGY ? "Downloading AGY CLI…" : (settings.resolvedAGYBinaryPath == nil ? "Download AGY CLI" : "Re-download / Update AGY CLI"))
-                                            .font(.system(size: 12, weight: .medium))
+                                        Text(isDownloadingAGY ? "Downloading…" : (settings.resolvedAGYBinaryPath == nil ? "Download CLI" : "Update CLI"))
+                                            .font(.system(size: 11.5))
                                     }
                                 }
+                                .controlSize(.small)
                                 .disabled(isDownloadingAGY)
-
-                                Button("Refresh AGY Models") {
-                                    Task {
-                                        await settings.refreshModelsForCurrentProvider()
-                                        modelInput = settings.currentModel
-                                    }
-                                }
-                                .disabled(isDownloadingAGY || settings.isFetchingModels)
                             }
 
                             if !agyDownloadStatus.isEmpty {
@@ -181,22 +156,15 @@ public struct SettingsSheetView: View {
                                     .foregroundStyle(.secondary)
                             }
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Optional AGY-Portable Folder (leave blank to use host ~/.gemini login)")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                TextField("/Volumes/USB/AGY-Portable (optional)", text: $settings.agyPortableRootPath)
+                            DisclosureGroup("AGY-Portable Path (Optional)") {
+                                TextField("/Volumes/USB/AGY-Portable", text: $settings.agyPortableRootPath)
                                     .textFieldStyle(.roundedBorder)
                                     .font(.system(size: 11.5, design: .monospaced))
+                                    .padding(.top, 4)
                             }
-                            .padding(.top, 2)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
                         }
-                        .padding(12)
-                        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.75)
-                        )
                     }
 
                     // API Key Field
@@ -229,10 +197,10 @@ public struct SettingsSheetView: View {
                         }
                     }
 
-                    // Dynamic API Models Selection
+                    // Dynamic Model Selection
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text("Active Model (Dynamically Fetched from API `/models`)")
+                            Text("Model")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -242,14 +210,14 @@ public struct SettingsSheetView: View {
                                     modelInput = settings.currentModel
                                 }
                             } label: {
-                                Label(settings.isFetchingModels ? "Fetching…" : "Refresh API Models", systemImage: "arrow.clockwise")
+                                Label(settings.isFetchingModels ? "Refreshing…" : "Refresh", systemImage: "arrow.clockwise")
                                     .font(.system(size: 11))
                             }
                             .buttonStyle(.link)
                         }
 
                         HStack(spacing: 8) {
-                            TextField("Model ID (fetched from API)", text: $modelInput)
+                            TextField("Model ID", text: $modelInput)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 12, design: .monospaced))
                                 .onChange(of: modelInput) { _, newValue in
@@ -257,7 +225,7 @@ public struct SettingsSheetView: View {
                                 }
 
                             if !settings.availableModels.isEmpty {
-                                Menu("API Models (\(settings.availableModels.count))") {
+                                Menu("Models (\(settings.availableModels.count))") {
                                     ForEach(settings.availableModels) { m in
                                         Button(m.displayLabel) {
                                             modelInput = m.id
@@ -265,16 +233,16 @@ public struct SettingsSheetView: View {
                                         }
                                     }
                                 }
-                                .frame(width: 150)
+                                .frame(width: 140)
                             }
                         }
                     }
 
-                    // Reasoning Effort Level (Dynamically populated from API `/models`)
+                    // Reasoning Effort / Variant Level
                     let levels = settings.supportedEffortLevelsForCurrentModel
                     if !levels.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Thinking Effort (Dynamic from API)")
+                            Text("Thinking Effort")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.secondary)
 
