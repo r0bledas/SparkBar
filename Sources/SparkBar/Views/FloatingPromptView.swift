@@ -606,7 +606,7 @@ public struct FloatingPromptView: View {
                             Image(systemName: Self.iconName(for: record))
                                 .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(record.isError ? Color.orange : Color.accentColor)
-                            Text(record.toolName)
+                            Text(Self.displayToolTitle(for: record))
                                 .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                             if !isExpanded {
                                 Text(commandText)
@@ -753,12 +753,36 @@ public struct FloatingPromptView: View {
         return "apple.terminal"
     }
 
+    private static func displayToolTitle(for record: ToolExecutionRecord) -> String {
+        switch record.toolName.lowercased() {
+        case "web_search", "search_web":
+            return "Searched:"
+        case "fetch_url", "read_url_content":
+            return "Viewed:"
+        default:
+            return record.toolName
+        }
+    }
+
     private static func formattedToolCommand(for record: ToolExecutionRecord) -> String {
-        if record.toolName == "run_command",
-           let data = record.arguments.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let cmd = (obj["command"] as? String) ?? (obj["CommandLine"] as? String), !cmd.isEmpty {
-            return cmd
+        if let data = record.arguments.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            switch record.toolName.lowercased() {
+            case "run_command":
+                if let cmd = (obj["command"] as? String) ?? (obj["CommandLine"] as? String), !cmd.isEmpty {
+                    return cmd
+                }
+            case "web_search", "search_web":
+                if let query = (obj["query"] as? String) ?? (obj["Query"] as? String), !query.isEmpty {
+                    return query
+                }
+            case "fetch_url", "read_url_content":
+                if let url = (obj["url"] as? String) ?? (obj["Url"] as? String), !url.isEmpty {
+                    return url
+                }
+            default:
+                break
+            }
         }
         return record.arguments
     }
