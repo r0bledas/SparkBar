@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="SparkBar"
-VERSION="${1:-1.5.11}"
+VERSION="${1:-1.5.12}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 BUNDLE_DIR="dist/${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_DIR}/Contents"

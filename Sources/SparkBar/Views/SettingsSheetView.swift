@@ -285,9 +285,9 @@ public struct SettingsSheetView: View {
 
                     Divider()
 
-                    // Agent Tools & Capabilities (Hermes / OpenCode engine)
+                    // Tools & Web Search
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Agent Tools & Web Search (Hermes / OpenCode Engine)")
+                        Text("Tools & Web Search")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
 
