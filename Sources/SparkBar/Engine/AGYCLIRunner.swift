@@ -592,7 +592,7 @@ public final class AGYAccountManager: ObservableObject {
         reload()
     }
 
-    private func resolvedPaths(portableRoot: String) -> (accountsDir: URL, activeFile: URL, liveTokenURL: URL) {
+    private func resolvedPaths(portableRoot: String) -> (accountsDir: URL, activeFile: URL, modernLiveTokenURL: URL, legacyLiveTokenURL: URL, cliStateURL: URL) {
         let fm = FileManager.default
         let trimmed = portableRoot.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
@@ -600,11 +600,17 @@ public final class AGYAccountManager: ObservableObject {
             let dataRoot = root.appendingPathComponent("data", isDirectory: true)
             let accountsDir = dataRoot.appendingPathComponent("accounts", isDirectory: true)
             let activeFile = accountsDir.appendingPathComponent(".active")
-            let liveToken = dataRoot
+            let geminiDir = dataRoot
                 .appendingPathComponent("home", isDirectory: true)
                 .appendingPathComponent(".gemini", isDirectory: true)
-                .appendingPathComponent("jetski-standalone-oauth-token")
-            return (accountsDir, activeFile, liveToken)
+            let modernToken = geminiDir
+                .appendingPathComponent("antigravity-cli", isDirectory: true)
+                .appendingPathComponent("antigravity-oauth-token")
+            let legacyToken = geminiDir.appendingPathComponent("jetski-standalone-oauth-token")
+            let cliState = geminiDir
+                .appendingPathComponent("antigravity-cli", isDirectory: true)
+                .appendingPathComponent("jetski_state.pbtxt")
+            return (accountsDir, activeFile, modernToken, legacyToken, cliState)
         }
 
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -613,10 +619,26 @@ public final class AGYAccountManager: ObservableObject {
             .appendingPathComponent("SparkBar", isDirectory: true)
             .appendingPathComponent("agy-accounts", isDirectory: true)
         let activeFile = accountsDir.appendingPathComponent(".active")
-        let liveToken = fm.homeDirectoryForCurrentUser
-            .appendingPathComponent(".gemini", isDirectory: true)
-            .appendingPathComponent("jetski-standalone-oauth-token")
-        return (accountsDir, activeFile, liveToken)
+        let geminiDir = fm.homeDirectoryForCurrentUser.appendingPathComponent(".gemini", isDirectory: true)
+        let modernToken = geminiDir
+            .appendingPathComponent("antigravity-cli", isDirectory: true)
+            .appendingPathComponent("antigravity-oauth-token")
+        let legacyToken = geminiDir.appendingPathComponent("jetski-standalone-oauth-token")
+        let cliState = geminiDir
+            .appendingPathComponent("antigravity-cli", isDirectory: true)
+            .appendingPathComponent("jetski_state.pbtxt")
+        return (accountsDir, activeFile, modernToken, legacyToken, cliState)
+    }
+
+    private func existingLiveTokenURL(in paths: (accountsDir: URL, activeFile: URL, modernLiveTokenURL: URL, legacyLiveTokenURL: URL, cliStateURL: URL)) -> URL? {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: paths.modernLiveTokenURL.path) {
+            return paths.modernLiveTokenURL
+        }
+        if fm.fileExists(atPath: paths.legacyLiveTokenURL.path) {
+            return paths.legacyLiveTokenURL
+        }
+        return nil
     }
 
     public func reload(portableRoot: String? = nil) {
@@ -625,12 +647,13 @@ public final class AGYAccountManager: ObservableObject {
         let fm = FileManager.default
         try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
 
-        let liveExists = fm.fileExists(atPath: paths.liveTokenURL.path)
+        let liveToken = existingLiveTokenURL(in: paths)
+        let hasHostSession = (liveToken != nil) || fm.fileExists(atPath: paths.cliStateURL.path)
         var discovered = listAccountNames(in: paths.accountsDir)
 
-        // Auto-migrate existing host/portable login into "default" profile if none saved yet
-        if liveExists && discovered.isEmpty {
-            storeToken(from: paths.liveTokenURL, as: "default", in: paths.accountsDir)
+        // Auto-migrate existing host/portable token into "default" profile if none saved yet
+        if let tokenURL = liveToken, discovered.isEmpty {
+            storeToken(from: tokenURL, as: "default", in: paths.accountsDir)
             writeActive("default", to: paths.activeFile)
             discovered = ["default"]
         }
@@ -638,7 +661,7 @@ public final class AGYAccountManager: ObservableObject {
         let active = readActive(from: paths.activeFile)
         self.accounts = discovered
         self.activeAccount = (!active.isEmpty && discovered.contains(active)) ? active : (discovered.first ?? "")
-        self.isSignedIn = liveExists || !discovered.isEmpty
+        self.isSignedIn = hasHostSession || !discovered.isEmpty
     }
 
     public func switchAccount(to name: String, portableRoot: String? = nil) {
@@ -650,16 +673,17 @@ public final class AGYAccountManager: ObservableObject {
         guard fm.fileExists(atPath: targetToken.path) else { return }
 
         // Persist any refreshed live token back into the previously active profile before swapping
-        if !activeAccount.isEmpty && fm.fileExists(atPath: paths.liveTokenURL.path) {
-            storeToken(from: paths.liveTokenURL, as: activeAccount, in: paths.accountsDir)
+        if !activeAccount.isEmpty, let liveURL = existingLiveTokenURL(in: paths) {
+            storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
         }
 
-        // Load selected profile token into the live slot
-        let geminiDir = paths.liveTokenURL.deletingLastPathComponent()
-        try? fm.createDirectory(at: geminiDir, withIntermediateDirectories: true)
-        try? fm.removeItem(at: paths.liveTokenURL)
-        try? fm.copyItem(at: targetToken, to: paths.liveTokenURL)
-        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: paths.liveTokenURL.path)
+        // Load selected profile token into both modern (v1.5+) and legacy live token slots
+        for liveSlot in [paths.modernLiveTokenURL, paths.legacyLiveTokenURL] {
+            try? fm.createDirectory(at: liveSlot.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? fm.removeItem(at: liveSlot)
+            try? fm.copyItem(at: targetToken, to: liveSlot)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: liveSlot.path)
+        }
 
         writeActive(name, to: paths.activeFile)
         reload(portableRoot: root)
@@ -686,6 +710,9 @@ public final class AGYAccountManager: ObservableObject {
 
     /// Launches `agy` in Terminal.app with an isolated temp `$HOME` so the user can complete Google OAuth
     /// for a new (or re-authenticated) profile without disrupting the currently active account.
+    /// A background watcher detects the OAuth token the instant it is written (supporting both v1.5+
+    /// `antigravity-cli/antigravity-oauth-token` and legacy `jetski-standalone-oauth-token`), kills `agy`,
+    /// saves the profile, closes the Terminal window, and returns focus to SparkBar.
     public func launchLoginInTerminal(accountName rawName: String, binaryPath: String, portableRoot: String? = nil) {
         let cleanName = rawName
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -698,12 +725,13 @@ public final class AGYAccountManager: ObservableObject {
         try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
 
         // Sync current active token back first
-        if !activeAccount.isEmpty && fm.fileExists(atPath: paths.liveTokenURL.path) {
-            storeToken(from: paths.liveTokenURL, as: activeAccount, in: paths.accountsDir)
+        if !activeAccount.isEmpty, let liveURL = existingLiveTokenURL(in: paths) {
+            storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
         }
 
         let tempHome = fm.temporaryDirectory.appendingPathComponent("sparkbar_agy_login_\(UUID().uuidString.prefix(8))", isDirectory: true)
-        let tempToken = tempHome.appendingPathComponent(".gemini/jetski-standalone-oauth-token")
+        let tempModernToken = tempHome.appendingPathComponent(".gemini/antigravity-cli/antigravity-oauth-token")
+        let tempLegacyToken = tempHome.appendingPathComponent(".gemini/jetski-standalone-oauth-token")
         let destDir = paths.accountsDir.appendingPathComponent(profileName, isDirectory: true)
         let destToken = destDir.appendingPathComponent("token")
         let scriptURL = fm.temporaryDirectory.appendingPathComponent("sparkbar_agy_login_\(UUID().uuidString.prefix(8)).command")
@@ -717,25 +745,39 @@ public final class AGYAccountManager: ObservableObject {
         echo "Complete Google sign-in in your browser."
         echo "This window will close automatically once signed in."
         echo ""
-        mkdir -p "\(tempHome.path)/.gemini"
+        mkdir -p "\(tempHome.path)/.gemini/antigravity-cli"
 
-        # Background token watcher: the instant agy writes the OAuth token, kill the foreground agy
-        # process so the user is never stuck inside the interactive CLI TUI, save the profile, and close Terminal.
+        save_token_file() {
+            local SRC="$1"
+            mkdir -p "\(destDir.path)" "\(paths.modernLiveTokenURL.deletingLastPathComponent().path)" "\(paths.legacyLiveTokenURL.deletingLastPathComponent().path)"
+            cp -f "$SRC" "\(destToken.path)"
+            chmod 600 "\(destToken.path)"
+            cp -f "$SRC" "\(paths.modernLiveTokenURL.path)"
+            chmod 600 "\(paths.modernLiveTokenURL.path)"
+            cp -f "$SRC" "\(paths.legacyLiveTokenURL.path)"
+            chmod 600 "\(paths.legacyLiveTokenURL.path)"
+            printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
+        }
+
+        # Background token watcher: detects either modern v1.5+ or legacy OAuth token file immediately,
+        # kills the foreground agy TUI so the user is never stuck in CLI mode, saves the profile, and closes Terminal.
         MAIN_SHELL_PID=$$
         (
-            while [ ! -s "\(tempToken.path)" ]; do
-                sleep 0.25
+            FOUND_TOKEN=""
+            while [ -z "$FOUND_TOKEN" ]; do
+                if [ -s "\(tempModernToken.path)" ]; then
+                    FOUND_TOKEN="\(tempModernToken.path)"
+                elif [ -s "\(tempLegacyToken.path)" ]; then
+                    FOUND_TOKEN="\(tempLegacyToken.path)"
+                else
+                    sleep 0.25
+                fi
             done
             sleep 0.4
-            mkdir -p "\(destDir.path)" "\(paths.liveTokenURL.deletingLastPathComponent().path)"
-            cp -f "\(tempToken.path)" "\(destToken.path)"
-            chmod 600 "\(destToken.path)"
-            cp -f "\(tempToken.path)" "\(paths.liveTokenURL.path)"
-            chmod 600 "\(paths.liveTokenURL.path)"
-            printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
-            pkill -TERM -P "$MAIN_SHELL_PID" -f "\(binaryPath)" 2>/dev/null || true
+            save_token_file "$FOUND_TOKEN"
+            pkill -TERM -P "$MAIN_SHELL_PID" 2>/dev/null || true
             sleep 0.25
-            pkill -KILL -P "$MAIN_SHELL_PID" -f "\(binaryPath)" 2>/dev/null || true
+            pkill -KILL -P "$MAIN_SHELL_PID" 2>/dev/null || true
         ) &
         WATCHER_PID=$!
 
@@ -744,13 +786,12 @@ public final class AGYAccountManager: ObservableObject {
         kill "$WATCHER_PID" 2>/dev/null || true
 
         # Fallback save if token appeared right as user exited manually
-        if [ -s "\(tempToken.path)" ] && [ ! -s "\(destToken.path)" ]; then
-            mkdir -p "\(destDir.path)" "\(paths.liveTokenURL.deletingLastPathComponent().path)"
-            cp -f "\(tempToken.path)" "\(destToken.path)"
-            chmod 600 "\(destToken.path)"
-            cp -f "\(tempToken.path)" "\(paths.liveTokenURL.path)"
-            chmod 600 "\(paths.liveTokenURL.path)"
-            printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
+        if [ ! -s "\(destToken.path)" ]; then
+            if [ -s "\(tempModernToken.path)" ]; then
+                save_token_file "\(tempModernToken.path)"
+            elif [ -s "\(tempLegacyToken.path)" ]; then
+                save_token_file "\(tempLegacyToken.path)"
+            fi
         fi
 
         rm -rf "\(tempHome.path)"
