@@ -641,6 +641,8 @@ public final class AGYAccountManager: ObservableObject {
         return nil
     }
 
+    public static let hostAccountLabel = "Host Account"
+
     public func reload(portableRoot: String? = nil) {
         let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
         let paths = resolvedPaths(portableRoot: root)
@@ -651,17 +653,46 @@ public final class AGYAccountManager: ObservableObject {
         let hasHostSession = (liveToken != nil) || fm.fileExists(atPath: paths.cliStateURL.path)
         var discovered = listAccountNames(in: paths.accountsDir)
 
-        // Auto-migrate existing host/portable token into "default" profile if none saved yet
+        // Auto-migrate existing standalone token file into a named profile (using email if readable, else "default")
         if let tokenURL = liveToken, discovered.isEmpty {
-            storeToken(from: tokenURL, as: "default", in: paths.accountsDir)
-            writeActive("default", to: paths.activeFile)
-            discovered = ["default"]
+            let inferredName = Self.extractEmail(from: tokenURL) ?? "default"
+            storeToken(from: tokenURL, as: inferredName, in: paths.accountsDir)
+            writeActive(inferredName, to: paths.activeFile)
+            discovered = [inferredName]
+        }
+
+        // If signed in via host macOS Keychain / Antigravity app with no standalone token files yet,
+        // represent the active host login as the first account rather than showing "None".
+        if hasHostSession && discovered.isEmpty {
+            discovered = [Self.hostAccountLabel]
         }
 
         let active = readActive(from: paths.activeFile)
         self.accounts = discovered
-        self.activeAccount = (!active.isEmpty && discovered.contains(active)) ? active : (discovered.first ?? "")
+        if !active.isEmpty && discovered.contains(active) {
+            self.activeAccount = active
+        } else {
+            self.activeAccount = discovered.first ?? ""
+        }
         self.isSignedIn = hasHostSession || !discovered.isEmpty
+    }
+
+    /// Best-effort extraction of an email address from a JSON or JWT OAuth token file (returns nil if opaque/encrypted).
+    private static func extractEmail(from tokenURL: URL) -> String? {
+        guard let data = try? Data(contentsOf: tokenURL),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["email", "user_email", "account", "login"] {
+                if let val = obj[key] as? String, val.contains("@") {
+                    return val
+                }
+            }
+        }
+        let pattern = #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#
+        if let range = text.range(of: pattern, options: .regularExpression) {
+            return String(text[range])
+        }
+        return nil
     }
 
     public func switchAccount(to name: String, portableRoot: String? = nil) {
@@ -669,11 +700,26 @@ public final class AGYAccountManager: ObservableObject {
         let paths = resolvedPaths(portableRoot: root)
         let fm = FileManager.default
 
+        if name == Self.hostAccountLabel {
+            // Switching back to host Keychain login: remove standalone override files after saving old profile
+            if !activeAccount.isEmpty && activeAccount != Self.hostAccountLabel,
+               let liveURL = existingLiveTokenURL(in: paths) {
+                storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
+            }
+            try? fm.removeItem(at: paths.modernLiveTokenURL)
+            try? fm.removeItem(at: paths.legacyLiveTokenURL)
+            writeActive(Self.hostAccountLabel, to: paths.activeFile)
+            reload(portableRoot: root)
+            Task { await SettingsStore.shared.refreshModelsForCurrentProvider() }
+            return
+        }
+
         let targetToken = paths.accountsDir.appendingPathComponent(name, isDirectory: true).appendingPathComponent("token")
         guard fm.fileExists(atPath: targetToken.path) else { return }
 
         // Persist any refreshed live token back into the previously active profile before swapping
-        if !activeAccount.isEmpty, let liveURL = existingLiveTokenURL(in: paths) {
+        if !activeAccount.isEmpty && activeAccount != Self.hostAccountLabel,
+           let liveURL = existingLiveTokenURL(in: paths) {
             storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
         }
 

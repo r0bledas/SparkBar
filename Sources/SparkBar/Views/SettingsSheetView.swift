@@ -129,7 +129,7 @@ public struct SettingsSheetView: View {
                                 Circle()
                                     .fill(hasBin && agyAccounts.isSignedIn ? Color.green : Color.orange)
                                     .frame(width: 8, height: 8)
-                                Text(hasBin ? (agyAccounts.isSignedIn ? "AGY CLI Ready" : "Sign In Required") : "AGY CLI Not Installed")
+                                Text(hasBin ? (agyAccounts.isSignedIn ? "Signed In" : "Sign In Required") : "AGY CLI Not Installed")
                                     .font(.system(size: 12.5, weight: .medium))
 
                                 Spacer()
@@ -168,29 +168,23 @@ public struct SettingsSheetView: View {
                                 }
                             }
 
-                            if hasBin {
+                            if hasBin && agyAccounts.isSignedIn {
                                 HStack(spacing: 8) {
                                     Text("Account")
                                         .font(.system(size: 12))
                                         .foregroundStyle(.secondary)
 
-                                    if !agyAccounts.accounts.isEmpty {
-                                        Picker("Account", selection: Binding(
-                                            get: { agyAccounts.activeAccount },
-                                            set: { agyAccounts.switchAccount(to: $0) }
-                                        )) {
-                                            ForEach(agyAccounts.accounts, id: \.self) { name in
-                                                Text(name).tag(name)
-                                            }
+                                    Picker("Account", selection: Binding(
+                                        get: { agyAccounts.activeAccount },
+                                        set: { agyAccounts.switchAccount(to: $0) }
+                                    )) {
+                                        ForEach(agyAccounts.accounts, id: \.self) { name in
+                                            Text(name).tag(name)
                                         }
-                                        .labelsHidden()
-                                        .pickerStyle(.menu)
-                                        .frame(maxWidth: 180)
-                                    } else {
-                                        Text("None")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.secondary)
                                     }
+                                    .labelsHidden()
+                                    .pickerStyle(.menu)
+                                    .frame(maxWidth: 200)
 
                                     Spacer()
 
@@ -204,7 +198,9 @@ public struct SettingsSheetView: View {
                                     .controlSize(.small)
                                     .help("Add another Google account")
 
-                                    if agyAccounts.accounts.count > 1, !agyAccounts.activeAccount.isEmpty {
+                                    if agyAccounts.accounts.count > 1,
+                                       !agyAccounts.activeAccount.isEmpty,
+                                       agyAccounts.activeAccount != AGYAccountManager.hostAccountLabel {
                                         Button {
                                             agyAccounts.removeAccount(named: agyAccounts.activeAccount)
                                         } label: {
@@ -218,7 +214,7 @@ public struct SettingsSheetView: View {
 
                                 if isAddingAccount {
                                     HStack(spacing: 6) {
-                                        TextField("Account name (e.g. school, personal)", text: $newAccountName)
+                                        TextField("Email or label (e.g. school, personal)", text: $newAccountName)
                                             .textFieldStyle(.roundedBorder)
                                             .font(.system(size: 11.5))
                                             .onSubmit { triggerAddAccountLogin() }
@@ -236,18 +232,6 @@ public struct SettingsSheetView: View {
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
-
-                            DisclosureGroup("AGY-Portable Folder (Optional)") {
-                                TextField("/Volumes/USB/AGY-Portable", text: $settings.agyPortableRootPath)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: 11.5, design: .monospaced))
-                                    .padding(.top, 4)
-                                    .onChange(of: settings.agyPortableRootPath) { _, newVal in
-                                        agyAccounts.reload(portableRoot: newVal)
-                                    }
-                            }
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
                         }
                         .padding(12)
                         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -424,6 +408,21 @@ public struct SettingsSheetView: View {
                                 .textSelection(.enabled)
                         }
                     }
+
+                    Divider()
+
+                    // Extra: Optional AGY-Portable USB Integration
+                    DisclosureGroup("AGY-Portable Folder (Optional)") {
+                        TextField("/Volumes/USB/AGY-Portable", text: $settings.agyPortableRootPath)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .padding(.top, 4)
+                            .onChange(of: settings.agyPortableRootPath) { _, newVal in
+                                agyAccounts.reload(portableRoot: newVal)
+                            }
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
                 }
                 .padding(.trailing, 4)
             }
@@ -483,7 +482,7 @@ public struct SettingsSheetView: View {
                     agyAccounts.launchLoginInTerminal(accountName: "default", binaryPath: path)
                 } else {
                     await settings.refreshModelsForCurrentProvider()
-                    agyDownloadStatus = "Ready (\(settings.availableModels.count) models)."
+                    agyDownloadStatus = "Signed in."
                 }
             } catch {
                 agyDownloadStatus = "Error: \(error.localizedDescription)"
@@ -502,7 +501,7 @@ public struct SettingsSheetView: View {
                     Task { @MainActor in agyDownloadStatus = progress }
                 }
                 await settings.refreshModelsForCurrentProvider()
-                agyDownloadStatus = "Updated (\(settings.availableModels.count) models)."
+                agyDownloadStatus = "CLI updated."
             } catch {
                 agyDownloadStatus = "Error: \(error.localizedDescription)"
             }
