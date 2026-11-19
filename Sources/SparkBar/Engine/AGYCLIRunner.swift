@@ -712,20 +712,30 @@ public final class AGYAccountManager: ObservableObject {
 
         let liveToken = existingLiveTokenURL(in: paths)
         let signedOutMarker = paths.accountsDir.appendingPathComponent(".signed_out")
+        let dismissedFile = paths.accountsDir.appendingPathComponent(".dismissed")
         let explicitlySignedOut = fm.fileExists(atPath: signedOutMarker.path)
-        let hostEmail = explicitlySignedOut ? nil : Self.detectHostSignedInEmail()
-        let hasHostSession = !explicitlySignedOut && ((liveToken != nil) || (hostEmail != nil) || fm.fileExists(atPath: paths.cliStateURL.path))
+        let dismissedSet: Set<String> = {
+            guard let raw = try? String(contentsOf: dismissedFile, encoding: .utf8) else { return [] }
+            return Set(raw.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        }()
+
+        let rawHostEmail = explicitlySignedOut ? nil : Self.detectHostSignedInEmail()
+        let hostEmail = rawHostEmail.flatMap { dismissedSet.contains($0) ? nil : $0 }
+        let hasHostSession = !explicitlySignedOut && ((liveToken != nil) || (hostEmail != nil) || (fm.fileExists(atPath: paths.cliStateURL.path) && dismissedSet.isEmpty))
         var discovered = listAccountNames(in: paths.accountsDir)
 
         // Auto-migrate existing standalone token file into an email-named profile if none saved yet
         if !explicitlySignedOut, let tokenURL = liveToken, discovered.isEmpty {
             let inferredName = Self.extractEmail(from: tokenURL) ?? hostEmail ?? "account"
-            storeToken(from: tokenURL, as: inferredName, in: paths.accountsDir)
-            writeActive(inferredName, to: paths.activeFile)
-            discovered = [inferredName]
+            if !dismissedSet.contains(inferredName) {
+                storeToken(from: tokenURL, as: inferredName, in: paths.accountsDir)
+                writeActive(inferredName, to: paths.activeFile)
+                discovered = [inferredName]
+            }
         }
 
-        // If signed in via host macOS Keychain / Antigravity app, include the detected email as the primary account
+        // If signed in via host macOS Keychain / Antigravity app (and not explicitly removed by user),
+        // include the detected email as the primary account
         if let email = hostEmail, !discovered.contains(email) {
             discovered.insert(email, at: 0)
         }
@@ -814,6 +824,17 @@ public final class AGYAccountManager: ObservableObject {
         let dir = paths.accountsDir.appendingPathComponent(name, isDirectory: true)
         try? fm.removeItem(at: dir)
 
+        // Record removed email in .dismissed so reload() never auto-reimports it from host Antigravity app_storage.json
+        let dismissedFile = paths.accountsDir.appendingPathComponent(".dismissed")
+        var dismissed = Set(
+            ((try? String(contentsOf: dismissedFile, encoding: .utf8)) ?? "")
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+        dismissed.insert(name)
+        try? dismissed.sorted().joined(separator: "\n").write(to: dismissedFile, atomically: true, encoding: .utf8)
+
         let wasLast = accounts.count <= 1
         if activeAccount == name || wasLast {
             try? fm.removeItem(at: paths.activeFile)
@@ -887,6 +908,10 @@ public final class AGYAccountManager: ObservableObject {
             cp -f "$SRC" "\(paths.legacyLiveTokenURL.path)"
             chmod 600 "\(paths.legacyLiveTokenURL.path)"
             rm -f "\(paths.accountsDir.path)/.signed_out"
+            if [ -f "\(paths.accountsDir.path)/.dismissed" ]; then
+                grep -vxF "$EMAIL" "\(paths.accountsDir.path)/.dismissed" > "\(paths.accountsDir.path)/.dismissed.tmp" 2>/dev/null || true
+                mv -f "\(paths.accountsDir.path)/.dismissed.tmp" "\(paths.accountsDir.path)/.dismissed" 2>/dev/null || true
+            fi
             printf '%s\\r\\n' "$EMAIL" > "\(paths.activeFile.path)"
             touch "\(doneMarker.path)"
         }
