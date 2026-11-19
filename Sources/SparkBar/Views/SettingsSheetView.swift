@@ -61,8 +61,6 @@ public struct SettingsSheetView: View {
     @State private var showSavedToast: Bool = false
     @State private var isDownloadingAGY: Bool = false
     @State private var agyDownloadStatus: String = ""
-    @State private var isAddingAccount: Bool = false
-    @State private var newAccountName: String = ""
 
     public init() {}
 
@@ -129,7 +127,7 @@ public struct SettingsSheetView: View {
                                 Circle()
                                     .fill(hasBin && agyAccounts.isSignedIn ? Color.green : Color.orange)
                                     .frame(width: 8, height: 8)
-                                Text(hasBin ? (agyAccounts.isSignedIn ? "Signed In" : "Sign In Required") : "AGY CLI Not Installed")
+                                Text(hasBin ? (agyAccounts.isSignedIn ? "AGY · Signed In" : "AGY · Sign In Required") : "AGY · Not Installed")
                                     .font(.system(size: 12.5, weight: .medium))
 
                                 Spacer()
@@ -149,17 +147,17 @@ public struct SettingsSheetView: View {
                                 } else if !agyAccounts.isSignedIn {
                                     Button("Sign In with Google") {
                                         if let bin = settings.resolvedAGYBinaryPath {
-                                            agyAccounts.launchLoginInTerminal(accountName: "default", binaryPath: bin)
+                                            agyAccounts.launchLoginInTerminal(binaryPath: bin)
                                         }
                                     }
                                     .controlSize(.small)
                                 } else {
                                     Button {
-                                        downloadAGYBinary()
+                                        checkForAGYUpdate()
                                     } label: {
                                         HStack(spacing: 4) {
                                             if isDownloadingAGY { ProgressView().controlSize(.small) }
-                                            Text(isDownloadingAGY ? "Updating…" : "Update CLI")
+                                            Text(isDownloadingAGY ? "Checking…" : "Check for Updates")
                                                 .font(.system(size: 11))
                                         }
                                     }
@@ -184,13 +182,14 @@ public struct SettingsSheetView: View {
                                     }
                                     .labelsHidden()
                                     .pickerStyle(.menu)
-                                    .frame(maxWidth: 200)
+                                    .frame(maxWidth: 240)
 
                                     Spacer()
 
                                     Button {
-                                        isAddingAccount.toggle()
-                                        newAccountName = ""
+                                        if let bin = settings.resolvedAGYBinaryPath {
+                                            agyAccounts.launchLoginInTerminal(binaryPath: bin)
+                                        }
                                     } label: {
                                         Image(systemName: "plus")
                                             .font(.system(size: 11, weight: .semibold))
@@ -199,8 +198,7 @@ public struct SettingsSheetView: View {
                                     .help("Add another Google account")
 
                                     if agyAccounts.accounts.count > 1,
-                                       !agyAccounts.activeAccount.isEmpty,
-                                       agyAccounts.activeAccount != AGYAccountManager.hostAccountLabel {
+                                       agyAccounts.isRemovableAccount(agyAccounts.activeAccount) {
                                         Button {
                                             agyAccounts.removeAccount(named: agyAccounts.activeAccount)
                                         } label: {
@@ -209,20 +207,6 @@ public struct SettingsSheetView: View {
                                         }
                                         .controlSize(.small)
                                         .help("Remove selected account")
-                                    }
-                                }
-
-                                if isAddingAccount {
-                                    HStack(spacing: 6) {
-                                        TextField("Email or label (e.g. school, personal)", text: $newAccountName)
-                                            .textFieldStyle(.roundedBorder)
-                                            .font(.system(size: 11.5))
-                                            .onSubmit { triggerAddAccountLogin() }
-                                        Button("Sign In") {
-                                            triggerAddAccountLogin()
-                                        }
-                                        .controlSize(.small)
-                                        .disabled(newAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                     }
                                 }
                             }
@@ -459,14 +443,6 @@ public struct SettingsSheetView: View {
         }
     }
 
-    private func triggerAddAccountLogin() {
-        let name = newAccountName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, let bin = settings.resolvedAGYBinaryPath else { return }
-        isAddingAccount = false
-        newAccountName = ""
-        agyAccounts.launchLoginInTerminal(accountName: name, binaryPath: bin)
-    }
-
     private func downloadAndPromptLogin() {
         guard !isDownloadingAGY else { return }
         isDownloadingAGY = true
@@ -479,7 +455,7 @@ public struct SettingsSheetView: View {
                 agyAccounts.reload()
                 if !agyAccounts.isSignedIn {
                     agyDownloadStatus = "Installed! Opening Google sign-in…"
-                    agyAccounts.launchLoginInTerminal(accountName: "default", binaryPath: path)
+                    agyAccounts.launchLoginInTerminal(binaryPath: path)
                 } else {
                     await settings.refreshModelsForCurrentProvider()
                     agyDownloadStatus = "Signed in."
@@ -491,19 +467,28 @@ public struct SettingsSheetView: View {
         }
     }
 
-    private func downloadAGYBinary() {
-        guard !isDownloadingAGY else { return }
+    private func checkForAGYUpdate() {
+        guard !isDownloadingAGY, let bin = settings.resolvedAGYBinaryPath else { return }
         isDownloadingAGY = true
-        agyDownloadStatus = "Updating AGY CLI…"
+        agyDownloadStatus = "Checking for AGY CLI updates…"
         Task { @MainActor in
-            do {
-                _ = try await AGYCLIRunner.downloadOfficialBinary { progress in
-                    Task { @MainActor in agyDownloadStatus = progress }
+            let check = await AGYCLIRunner.checkForCLIUpdate(binaryPath: bin)
+            if let err = check.error {
+                agyDownloadStatus = "Update check failed: \(err)"
+            } else if !check.updateAvailable {
+                let ver = check.installed.isEmpty ? (check.latest ?? "") : check.installed
+                agyDownloadStatus = ver.isEmpty ? "Up to date." : "Up to date (v\(ver))."
+            } else {
+                agyDownloadStatus = "Updating v\(check.installed) → v\(check.latest ?? "latest")…"
+                do {
+                    _ = try await AGYCLIRunner.downloadOfficialBinary { progress in
+                        Task { @MainActor in agyDownloadStatus = progress }
+                    }
+                    await settings.refreshModelsForCurrentProvider()
+                    agyDownloadStatus = "Updated to v\(check.latest ?? "latest")."
+                } catch {
+                    agyDownloadStatus = "Error: \(error.localizedDescription)"
                 }
-                await settings.refreshModelsForCurrentProvider()
-                agyDownloadStatus = "CLI updated."
-            } catch {
-                agyDownloadStatus = "Error: \(error.localizedDescription)"
             }
             isDownloadingAGY = false
         }

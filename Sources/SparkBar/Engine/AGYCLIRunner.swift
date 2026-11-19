@@ -514,6 +514,57 @@ public final class AGYCLIRunner: @unchecked Sendable {
         }
     }
 
+    /// Checks `agy --version` against Google's live release manifest without downloading anything.
+    public static func checkForCLIUpdate(binaryPath: String) async -> (installed: String, latest: String?, updateAvailable: Bool, error: String?) {
+        let arch = await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/uname")
+                p.arguments = ["-m"]
+                let pipe = Pipe()
+                p.standardOutput = pipe
+                try? p.run()
+                p.waitUntilExit()
+                let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "arm64"
+                cont.resume(returning: out)
+            }
+        }
+
+        let installedVersion: String = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: binaryPath)
+                p.arguments = ["--version"]
+                let pipe = Pipe()
+                p.standardOutput = pipe
+                p.standardError = pipe
+                try? p.run()
+                p.waitUntilExit()
+                let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                cont.resume(returning: raw)
+            }
+        }
+
+        let manifestName = (arch == "arm64") ? "darwin_arm64.json" : "darwin_amd64.json"
+        guard let url = URL(string: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/\(manifestName)") else {
+            return (installedVersion, nil, false, "Invalid manifest URL")
+        }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let latest = json["version"] as? String, !latest.isEmpty {
+                let isNewer = !installedVersion.isEmpty && installedVersion != latest
+                return (installedVersion, latest, isNewer, nil)
+            }
+            return (installedVersion, nil, false, "Could not parse manifest")
+        } catch {
+            return (installedVersion, nil, false, error.localizedDescription)
+        }
+    }
+
     /// Downloads the official macOS `agy` CLI binary from Google's release manifest into `managedBinaryURL`.
     public static func downloadOfficialBinary(onProgress: @escaping @Sendable (String) -> Void) async throws -> String {
         let targetURL = managedBinaryURL
@@ -641,7 +692,17 @@ public final class AGYAccountManager: ObservableObject {
         return nil
     }
 
-    public static let hostAccountLabel = "Host Account"
+    /// Detects the host Antigravity signed-in Google email from `~/Library/Application Support/Antigravity/app_storage.json`
+    /// or standalone OAuth token files (never returns fake placeholder labels like "Host Account").
+    private static func detectHostSignedInEmail() -> String? {
+        let fm = FileManager.default
+        let appStorage = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Antigravity/app_storage.json")
+        if let email = extractEmail(from: appStorage) {
+            return email
+        }
+        return nil
+    }
 
     public func reload(portableRoot: String? = nil) {
         let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
@@ -650,21 +711,21 @@ public final class AGYAccountManager: ObservableObject {
         try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
 
         let liveToken = existingLiveTokenURL(in: paths)
-        let hasHostSession = (liveToken != nil) || fm.fileExists(atPath: paths.cliStateURL.path)
+        let hostEmail = Self.detectHostSignedInEmail()
+        let hasHostSession = (liveToken != nil) || (hostEmail != nil) || fm.fileExists(atPath: paths.cliStateURL.path)
         var discovered = listAccountNames(in: paths.accountsDir)
 
-        // Auto-migrate existing standalone token file into a named profile (using email if readable, else "default")
+        // Auto-migrate existing standalone token file into an email-named profile if none saved yet
         if let tokenURL = liveToken, discovered.isEmpty {
-            let inferredName = Self.extractEmail(from: tokenURL) ?? "default"
+            let inferredName = Self.extractEmail(from: tokenURL) ?? hostEmail ?? "account"
             storeToken(from: tokenURL, as: inferredName, in: paths.accountsDir)
             writeActive(inferredName, to: paths.activeFile)
             discovered = [inferredName]
         }
 
-        // If signed in via host macOS Keychain / Antigravity app with no standalone token files yet,
-        // represent the active host login as the first account rather than showing "None".
-        if hasHostSession && discovered.isEmpty {
-            discovered = [Self.hostAccountLabel]
+        // If signed in via host macOS Keychain / Antigravity app, include the detected email as the primary account
+        if let email = hostEmail, !discovered.contains(email) {
+            discovered.insert(email, at: 0)
         }
 
         let active = readActive(from: paths.activeFile)
@@ -677,9 +738,9 @@ public final class AGYAccountManager: ObservableObject {
         self.isSignedIn = hasHostSession || !discovered.isEmpty
     }
 
-    /// Best-effort extraction of an email address from a JSON or JWT OAuth token file (returns nil if opaque/encrypted).
-    private static func extractEmail(from tokenURL: URL) -> String? {
-        guard let data = try? Data(contentsOf: tokenURL),
+    /// Best-effort extraction of an email address from a JSON, JWT, or Antigravity storage file.
+    private static func extractEmail(from fileURL: URL) -> String? {
+        guard let data = try? Data(contentsOf: fileURL),
               let text = String(data: data, encoding: .utf8) else { return nil }
         if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             for key in ["email", "user_email", "account", "login"] {
@@ -695,30 +756,35 @@ public final class AGYAccountManager: ObservableObject {
         return nil
     }
 
+    public func isRemovableAccount(_ name: String, portableRoot: String? = nil) -> Bool {
+        let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
+        let paths = resolvedPaths(portableRoot: root)
+        let targetToken = paths.accountsDir.appendingPathComponent(name, isDirectory: true).appendingPathComponent("token")
+        return FileManager.default.fileExists(atPath: targetToken.path)
+    }
+
     public func switchAccount(to name: String, portableRoot: String? = nil) {
         let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
         let paths = resolvedPaths(portableRoot: root)
         let fm = FileManager.default
 
-        if name == Self.hostAccountLabel {
-            // Switching back to host Keychain login: remove standalone override files after saving old profile
-            if !activeAccount.isEmpty && activeAccount != Self.hostAccountLabel,
+        let targetToken = paths.accountsDir.appendingPathComponent(name, isDirectory: true).appendingPathComponent("token")
+        if !fm.fileExists(atPath: targetToken.path) {
+            // Switching back to the host Keychain email session (no standalone token file override)
+            if !activeAccount.isEmpty && isRemovableAccount(activeAccount, portableRoot: root),
                let liveURL = existingLiveTokenURL(in: paths) {
                 storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
             }
             try? fm.removeItem(at: paths.modernLiveTokenURL)
             try? fm.removeItem(at: paths.legacyLiveTokenURL)
-            writeActive(Self.hostAccountLabel, to: paths.activeFile)
+            writeActive(name, to: paths.activeFile)
             reload(portableRoot: root)
             Task { await SettingsStore.shared.refreshModelsForCurrentProvider() }
             return
         }
 
-        let targetToken = paths.accountsDir.appendingPathComponent(name, isDirectory: true).appendingPathComponent("token")
-        guard fm.fileExists(atPath: targetToken.path) else { return }
-
         // Persist any refreshed live token back into the previously active profile before swapping
-        if !activeAccount.isEmpty && activeAccount != Self.hostAccountLabel,
+        if !activeAccount.isEmpty && isRemovableAccount(activeAccount, portableRoot: root),
            let liveURL = existingLiveTokenURL(in: paths) {
             storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
         }
@@ -754,16 +820,11 @@ public final class AGYAccountManager: ObservableObject {
         }
     }
 
-    /// Launches `agy` in Terminal.app with an isolated temp `$HOME` so the user can complete Google OAuth
-    /// for a new (or re-authenticated) profile without disrupting the currently active account.
-    /// A background watcher detects the OAuth token the instant it is written (supporting both v1.5+
-    /// `antigravity-cli/antigravity-oauth-token` and legacy `jetski-standalone-oauth-token`), kills `agy`,
-    /// saves the profile, closes the Terminal window, and returns focus to SparkBar.
-    public func launchLoginInTerminal(accountName rawName: String, binaryPath: String, portableRoot: String? = nil) {
-        let cleanName = rawName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
-        let profileName = cleanName.isEmpty ? "default" : cleanName
+    /// Launches `agy` in Terminal.app with an isolated temp `$HOME` so the user can complete Google OAuth.
+    /// Automatically detects the signed-in Google email from the OAuth token (no manual label required),
+    /// saves the profile under that email, kills `agy`, closes the Terminal window, and focuses SparkBar.
+    public func launchLoginInTerminal(accountName rawName: String = "", binaryPath: String, portableRoot: String? = nil) {
+        let fallbackName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let root = portableRoot ?? SettingsStore.shared.agyPortableRootPath
         let paths = resolvedPaths(portableRoot: root)
@@ -771,22 +832,22 @@ public final class AGYAccountManager: ObservableObject {
         try? fm.createDirectory(at: paths.accountsDir, withIntermediateDirectories: true)
 
         // Sync current active token back first
-        if !activeAccount.isEmpty, let liveURL = existingLiveTokenURL(in: paths) {
+        if !activeAccount.isEmpty && isRemovableAccount(activeAccount, portableRoot: root),
+           let liveURL = existingLiveTokenURL(in: paths) {
             storeToken(from: liveURL, as: activeAccount, in: paths.accountsDir)
         }
 
         let tempHome = fm.temporaryDirectory.appendingPathComponent("sparkbar_agy_login_\(UUID().uuidString.prefix(8))", isDirectory: true)
         let tempModernToken = tempHome.appendingPathComponent(".gemini/antigravity-cli/antigravity-oauth-token")
         let tempLegacyToken = tempHome.appendingPathComponent(".gemini/jetski-standalone-oauth-token")
-        let destDir = paths.accountsDir.appendingPathComponent(profileName, isDirectory: true)
-        let destToken = destDir.appendingPathComponent("token")
         let scriptURL = fm.temporaryDirectory.appendingPathComponent("sparkbar_agy_login_\(UUID().uuidString.prefix(8)).command")
+        let doneMarker = tempHome.appendingPathComponent(".sparkbar_done")
 
         let script = """
         #!/usr/bin/env bash
         clear
         echo "======================================================"
-        echo "  SparkBar — Sign In to Google Antigravity (\(profileName))"
+        echo "  SparkBar — Sign In with Google (AGY)"
         echo "======================================================"
         echo "Complete Google sign-in in your browser."
         echo "This window will close automatically once signed in."
@@ -795,14 +856,24 @@ public final class AGYAccountManager: ObservableObject {
 
         save_token_file() {
             local SRC="$1"
-            mkdir -p "\(destDir.path)" "\(paths.modernLiveTokenURL.deletingLastPathComponent().path)" "\(paths.legacyLiveTokenURL.deletingLastPathComponent().path)"
-            cp -f "$SRC" "\(destToken.path)"
-            chmod 600 "\(destToken.path)"
+            local EMAIL
+            EMAIL=$(grep -aoE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}' "$SRC" "\(tempHome.path)/Library/Application Support/Antigravity/app_storage.json" 2>/dev/null | head -n1 || true)
+            if [ -z "$EMAIL" ]; then
+                EMAIL="\(fallbackName)"
+            fi
+            if [ -z "$EMAIL" ]; then
+                EMAIL="account-$(date +%H%M%S)"
+            fi
+            local DEST_DIR="\(paths.accountsDir.path)/$EMAIL"
+            mkdir -p "$DEST_DIR" "\(paths.modernLiveTokenURL.deletingLastPathComponent().path)" "\(paths.legacyLiveTokenURL.deletingLastPathComponent().path)"
+            cp -f "$SRC" "$DEST_DIR/token"
+            chmod 600 "$DEST_DIR/token"
             cp -f "$SRC" "\(paths.modernLiveTokenURL.path)"
             chmod 600 "\(paths.modernLiveTokenURL.path)"
             cp -f "$SRC" "\(paths.legacyLiveTokenURL.path)"
             chmod 600 "\(paths.legacyLiveTokenURL.path)"
-            printf '%s\\r\\n' "\(profileName)" > "\(paths.activeFile.path)"
+            printf '%s\\r\\n' "$EMAIL" > "\(paths.activeFile.path)"
+            touch "\(doneMarker.path)"
         }
 
         # Background token watcher: detects either modern v1.5+ or legacy OAuth token file immediately,
@@ -832,7 +903,7 @@ public final class AGYAccountManager: ObservableObject {
         kill "$WATCHER_PID" 2>/dev/null || true
 
         # Fallback save if token appeared right as user exited manually
-        if [ ! -s "\(destToken.path)" ]; then
+        if [ ! -f "\(doneMarker.path)" ]; then
             if [ -s "\(tempModernToken.path)" ]; then
                 save_token_file "\(tempModernToken.path)"
             elif [ -s "\(tempLegacyToken.path)" ]; then
@@ -854,7 +925,6 @@ public final class AGYAccountManager: ObservableObject {
         try? script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
-        // Open the login helper in Terminal.app
         let openProc = Process()
         openProc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         openProc.arguments = ["-a", "Terminal", scriptURL.path]
@@ -864,13 +934,11 @@ public final class AGYAccountManager: ObservableObject {
         Task { @MainActor in
             for _ in 0..<240 {
                 try? await Task.sleep(nanoseconds: 500_000_000)
-                if fm.fileExists(atPath: destToken.path) {
+                if !fm.fileExists(atPath: scriptURL.path) {
                     self.reload(portableRoot: root)
                     await SettingsStore.shared.refreshModelsForCurrentProvider()
                     NSApp.activate(ignoringOtherApps: true)
-                    if !fm.fileExists(atPath: scriptURL.path) {
-                        break
-                    }
+                    break
                 }
             }
         }
