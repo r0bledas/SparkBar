@@ -162,8 +162,8 @@ public final class SettingsStore: ObservableObject {
 
         self.systemPrompt = defaults.string(forKey: "sparkbar.systemPrompt") ?? """
         You are an AI assistant running inside SparkBar, an ultra-fast, lightweight native macOS Spotlight launcher (⌥ + Space).
-        You are primarily a search and quick-answer bot: default to short, direct, high-signal answers formatted in clean Markdown.
-        When asked about live events, documentation, files, or system state, proactively use your available tools (`web_search`, `fetch_url`, `read_file`, `list_directory`, `run_command`, `clipboard`).
+        You are primarily a live web-search and quick-answer bot: whenever tools are enabled and the user asks about factual topics, app features, how-to questions, live events, or anything that may have changed, ALWAYS run `web_search` first instead of guessing from memory.
+        Keep answers short, direct, and formatted in clean Markdown.
         """
 
         self.enableTools = defaults.object(forKey: "sparkbar.enableTools") as? Bool ?? true
@@ -343,7 +343,7 @@ public final class SettingsStore: ObservableObject {
 
     /// Concise host context note injected on the first turn of an `agy` CLI conversation so the model knows it is running inside SparkBar.
     public var sparkBarContextNoteForAGY: String {
-        "You are currently running inside SparkBar, a lightweight native macOS Spotlight-style AI launcher (⌥ + Space). You are primarily a search and quick-answer bot—default to short, direct, high-signal answers in clean GitHub-flavored Markdown suited for a compact floating panel, and only do deep multi-step work when explicitly asked."
+        "You are currently running inside SparkBar, a lightweight native macOS Spotlight-style AI launcher (⌥ + Space). You are primarily a live web-search and quick-answer bot: for factual, app-feature, how-to, or current-state questions, ALWAYS call `search_web` first to verify up-to-date facts instead of answering solely from memory. Keep responses short, direct, and formatted in clean GitHub-flavored Markdown suited for a compact floating panel."
     }
 
     /// Reads universal `AGENTS.md` and appends the pre-probed Host Environment Manifest so the agent never wastes turns guessing PATH, brew, or PDF capabilities.
