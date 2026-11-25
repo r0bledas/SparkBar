@@ -108,7 +108,15 @@ public struct SettingsSheetView: View {
                             .foregroundStyle(.secondary)
 
                         Picker("Provider", selection: $settings.selectedProvider) {
-                            ForEach(LLMProviderType.allCases) { provider in
+                            ForEach(LLMProviderType.antigravityProviders) { provider in
+                                Text(provider.displayName).tag(provider)
+                            }
+                            Divider()
+                            ForEach(LLMProviderType.apiProviders) { provider in
+                                Text(provider.displayName).tag(provider)
+                            }
+                            Divider()
+                            ForEach(LLMProviderType.localProviders) { provider in
                                 Text(provider.displayName).tag(provider)
                             }
                         }

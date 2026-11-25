@@ -56,6 +56,10 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
             return false
         }
     }
+
+    public static let antigravityProviders: [LLMProviderType] = [.antigravity]
+    public static let apiProviders: [LLMProviderType] = [.deepseek, .openai, .openrouter, .anthropic, .groq, .gemini]
+    public static let localProviders: [LLMProviderType] = [.ollama, .custom]
 }
 
 /// Dynamic model metadata fetched live from `GET /models` or `agy models` — zero hardcoded model lists.

@@ -684,7 +684,33 @@ public struct FullScreenChatView: View {
 
                 if settings.showProviderInMainBar {
                     Menu {
-                        ForEach(LLMProviderType.allCases) { provider in
+                        ForEach(LLMProviderType.antigravityProviders) { provider in
+                            Button {
+                                settings.selectedProvider = provider
+                            } label: {
+                                HStack {
+                                    Text(provider.displayName)
+                                    if settings.selectedProvider == provider {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                        Divider()
+                        ForEach(LLMProviderType.apiProviders) { provider in
+                            Button {
+                                settings.selectedProvider = provider
+                            } label: {
+                                HStack {
+                                    Text(provider.displayName)
+                                    if settings.selectedProvider == provider {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                        Divider()
+                        ForEach(LLMProviderType.localProviders) { provider in
                             Button {
                                 settings.selectedProvider = provider
                             } label: {
