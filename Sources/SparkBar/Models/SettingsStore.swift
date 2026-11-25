@@ -136,6 +136,25 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Beta local HTTP API endpoint (OpenAI / Anthropic / Ollama compatible) bound to 127.0.0.1.
+    @Published public var enableLocalAPIServer: Bool {
+        didSet {
+            UserDefaults.standard.set(enableLocalAPIServer, forKey: "sparkbar.enableLocalAPIServer")
+            if enableLocalAPIServer {
+                LocalAPIServer.shared.start(port: localAPIServerPort)
+            } else {
+                LocalAPIServer.shared.stop()
+            }
+        }
+    }
+
+    /// Port for the Beta local HTTP API server (default 11435).
+    @Published public var localAPIServerPort: Int {
+        didSet {
+            UserDefaults.standard.set(localAPIServerPort, forKey: "sparkbar.localAPIServerPort")
+        }
+    }
+
     public var resolvedAGYBinaryPath: String? {
         AGYCLIRunner.resolveBinaryPath(customPath: agyCustomBinaryPath, portableRoot: agyPortableRootPath)
     }
@@ -178,6 +197,9 @@ public final class SettingsStore: ObservableObject {
         self.temperature = defaults.object(forKey: "sparkbar.temperature") as? Double ?? 0.3
         self.agyCustomBinaryPath = defaults.string(forKey: "sparkbar.agyCustomBinaryPath") ?? ""
         self.agyPortableRootPath = defaults.string(forKey: "sparkbar.agyPortableRootPath") ?? ""
+        self.enableLocalAPIServer = defaults.object(forKey: "sparkbar.enableLocalAPIServer") as? Bool ?? false
+        let savedPort = defaults.integer(forKey: "sparkbar.localAPIServerPort")
+        self.localAPIServerPort = (savedPort >= 1024 && savedPort <= 65535) ? savedPort : 11435
 
         // Hydrate cached model metadata immediately for zero-flash startup
         if let cachedData = defaults.data(forKey: "sparkbar.cachedModels.\(self.selectedProvider.rawValue)"),

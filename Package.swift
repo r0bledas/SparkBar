@@ -21,7 +21,8 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("Security"),
                 .linkedFramework("WebKit"),
-                .linkedFramework("PDFKit")
+                .linkedFramework("PDFKit"),
+                .linkedFramework("Network")
             ]
         ),
         .testTarget(

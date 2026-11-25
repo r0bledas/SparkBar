@@ -56,8 +56,11 @@ public struct SettingsSheetView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var updater = GitHubUpdater.shared
     @ObservedObject private var agyAccounts = AGYAccountManager.shared
+    @ObservedObject private var localAPI = LocalAPIServer.shared
     @State private var apiKeyInput: String = ""
     @State private var baseURLInput: String = ""
+    @State private var localAPIPortInput: String = ""
+    @State private var copiedEndpointLabel: String? = nil
     @State private var showSavedToast: Bool = false
     @State private var isDownloadingAGY: Bool = false
     @State private var agyDownloadStatus: String = ""
@@ -311,6 +314,82 @@ public struct SettingsSheetView: View {
 
                     Divider()
 
+                    // Local API Endpoint (Beta) — OpenAI / Anthropic / Ollama compatible
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Text("Local API Endpoint")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+
+                            Text("BETA")
+                                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.14), in: Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.orange.opacity(0.35), lineWidth: 0.75)
+                                )
+
+                            Spacer()
+
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(localAPI.isRunning ? Color.green : Color.secondary.opacity(0.4))
+                                    .frame(width: 7, height: 7)
+                                Text(localAPI.isRunning ? "Listening on :\(localAPI.activePort)" : "Stopped")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Toggle("Expose OpenAI, Anthropic & Ollama endpoints on 127.0.0.1", isOn: $settings.enableLocalAPIServer)
+                            .font(.system(size: 13))
+
+                        HStack(spacing: 8) {
+                            Text("Port")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+
+                            TextField("11435", text: $localAPIPortInput)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12, design: .monospaced))
+                                .frame(width: 84)
+                                .onSubmit { applyLocalAPIPort() }
+
+                            Button(localAPI.isRunning ? "Apply & Restart" : "Apply") {
+                                applyLocalAPIPort()
+                            }
+                            .controlSize(.small)
+
+                            Spacer()
+                        }
+
+                        if let err = localAPI.lastError, !err.isEmpty {
+                            Text(err)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.orange)
+                        }
+
+                        if settings.enableLocalAPIServer {
+                            let port = localAPI.isRunning ? localAPI.activePort : settings.localAPIServerPort
+                            VStack(alignment: .leading, spacing: 6) {
+                                endpointCopyRow(label: "OpenAI", url: "http://127.0.0.1:\(port)/v1")
+                                endpointCopyRow(label: "Anthropic", url: "http://127.0.0.1:\(port)")
+                                endpointCopyRow(label: "Ollama", url: "http://127.0.0.1:\(port)")
+                            }
+                            .padding(10)
+                            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
+                            )
+                        }
+                    }
+
+                    Divider()
+
                     // Window Behavior & Shortcut
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Window & Shortcut")
@@ -421,6 +500,7 @@ public struct SettingsSheetView: View {
         .frame(minWidth: 520, idealWidth: 580, maxWidth: .infinity, minHeight: 520, idealHeight: 620, maxHeight: .infinity)
         .onAppear {
             loadFields(for: settings.selectedProvider)
+            localAPIPortInput = String(settings.localAPIServerPort)
             agyAccounts.reload()
         }
         .alert(
@@ -443,6 +523,51 @@ public struct SettingsSheetView: View {
     private func loadFields(for provider: LLMProviderType) {
         apiKeyInput = settings.apiKey(for: provider)
         baseURLInput = settings.customEndpoints[provider.rawValue] ?? provider.defaultBaseURL
+    }
+
+    @ViewBuilder
+    private func endpointCopyRow(label: String, url: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 66, alignment: .leading)
+
+            Text(url)
+                .font(.system(size: 11.5, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url, forType: .string)
+                copiedEndpointLabel = label
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    if copiedEndpointLabel == label {
+                        copiedEndpointLabel = nil
+                    }
+                }
+            } label: {
+                Image(systemName: copiedEndpointLabel == label ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 10.5))
+            }
+            .buttonStyle(.borderless)
+            .help("Copy \(label) base URL")
+        }
+    }
+
+    private func applyLocalAPIPort() {
+        let trimmed = localAPIPortInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Int(trimmed), parsed >= 1024, parsed <= 65535 else {
+            localAPIPortInput = String(settings.localAPIServerPort)
+            return
+        }
+        settings.localAPIServerPort = parsed
+        if settings.enableLocalAPIServer {
+            LocalAPIServer.shared.start(port: parsed)
+        }
     }
 
     private func saveCurrentProviderFields() {

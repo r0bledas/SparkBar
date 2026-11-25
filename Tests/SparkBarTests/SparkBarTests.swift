@@ -409,4 +409,78 @@ final class SparkBarTests: XCTestCase {
             XCTAssertFalse(liveModels.isEmpty, "Expected live agy models list to be non-empty")
         }
     }
+
+    @MainActor
+    func testLocalAPIServerParsingAndLiveEndpoints() async throws {
+        // 1. Verify HTTP/1.1 parser handles GET, incomplete body, and complete POST JSON
+        let rawGet = Data("GET /v1/models?foo=bar HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".utf8)
+        if case .complete(let req) = LocalAPIServer.tryParseHTTPRequest(rawGet) {
+            XCTAssertEqual(req.method, "GET")
+            XCTAssertEqual(req.path, "/v1/models")
+            XCTAssertTrue(req.body.isEmpty)
+        } else {
+            XCTFail("Expected complete GET request")
+        }
+
+        let partialPost = Data("POST /v1/chat/completions HTTP/1.1\r\nContent-Length: 20\r\n\r\n{\"a\":1}".utf8)
+        if case .incomplete = LocalAPIServer.tryParseHTTPRequest(partialPost) {
+            // expected
+        } else {
+            XCTFail("Expected incomplete POST request when body is shorter than Content-Length")
+        }
+
+        // 2. Verify message extraction (system + string + block arrays)
+        let rawMsgs: [[String: Any]] = [
+            ["role": "system", "content": "Be concise."],
+            ["role": "user", "content": [["type": "text", "text": "Hello"], ["type": "text", "text": "World"]]]
+        ]
+        let extracted = LocalAPIServer.extractOpenAIMessages(rawMsgs)
+        XCTAssertEqual(extracted.system, "Be concise.")
+        XCTAssertEqual(extracted.messages.count, 1)
+        XCTAssertEqual(extracted.messages[0].content, "Hello\nWorld")
+
+        // 3. Start a live loopback server on a test port and verify OpenAI, Anthropic, and Ollama routes
+        let server = LocalAPIServer()
+        let testPort = 19435
+        server.start(port: testPort)
+        defer { server.stop() }
+
+        // Wait briefly for NWListener to become ready
+        for _ in 0..<25 {
+            if server.isRunning { break }
+            try await Task.sleep(nanoseconds: 40_000_000)
+        }
+        XCTAssertTrue(server.isRunning, "LocalAPIServer failed to start: \(server.lastError ?? "unknown")")
+
+        // GET /health
+        let (healthData, healthResp) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(testPort)/health")!)
+        XCTAssertEqual((healthResp as? HTTPURLResponse)?.statusCode, 200)
+        let healthJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: healthData) as? [String: Any])
+        XCTAssertEqual(healthJSON["status"] as? String, "ok")
+        XCTAssertEqual(healthJSON["beta"] as? Bool, true)
+
+        // GET /v1/models (OpenAI)
+        let (modelsData, modelsResp) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(testPort)/v1/models")!)
+        XCTAssertEqual((modelsResp as? HTTPURLResponse)?.statusCode, 200)
+        let modelsJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: modelsData) as? [String: Any])
+        XCTAssertEqual(modelsJSON["object"] as? String, "list")
+        let modelList = try XCTUnwrap(modelsJSON["data"] as? [[String: Any]])
+        XCTAssertFalse(modelList.isEmpty)
+
+        // GET /api/tags (Ollama)
+        let (tagsData, tagsResp) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(testPort)/api/tags")!)
+        XCTAssertEqual((tagsResp as? HTTPURLResponse)?.statusCode, 200)
+        let tagsJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: tagsData) as? [String: Any])
+        let ollamaModels = try XCTUnwrap(tagsJSON["models"] as? [[String: Any]])
+        XCTAssertFalse(ollamaModels.isEmpty)
+
+        // POST /v1/messages invalid JSON (Anthropic error envelope)
+        var badAnthropicReq = URLRequest(url: URL(string: "http://127.0.0.1:\(testPort)/v1/messages")!)
+        badAnthropicReq.httpMethod = "POST"
+        badAnthropicReq.httpBody = Data("not-json".utf8)
+        let (errData, errResp) = try await URLSession.shared.data(for: badAnthropicReq)
+        XCTAssertEqual((errResp as? HTTPURLResponse)?.statusCode, 400)
+        let errJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: errData) as? [String: Any])
+        XCTAssertEqual(errJSON["type"] as? String, "error")
+    }
 }

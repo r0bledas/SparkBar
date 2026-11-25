@@ -45,6 +45,8 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
 
 ## ✨ Features
 
+* **Local API Endpoint (`Beta`, `v1.7.0`):**
+  * Optional built-in loopback HTTP server (`127.0.0.1:11435` by default, configurable in Settings) exposing **OpenAI** (`/v1/models`, `/v1/chat/completions`), **Anthropic** (`/v1/messages`), and **Ollama** (`/api/tags`, `/api/chat`, `/api/generate`) endpoints—both streaming and non-streaming—backed by SparkBar's active LLM provider.
 * **Google Antigravity (AGY CLI) Zero-API-Key Provider (`v1.5.0`):**
   * Use your **Google One / Antigravity** plan directly inside SparkBar with **zero metered API keys**.
   * Spawns `agy -p ... --output-format stream-json` on-demand per turn and exits cleanly when finished — keeping **0 MB idle RAM** overhead while streaming live responses, tools, and persistent multi-turn conversations (`--conversation <id>`).
@@ -62,7 +64,7 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
 * **Featherweight Native Architecture:** Pure Swift & AppKit `NSPanel` with `.nonactivatingPanel`, `NSVisualEffectView` HUD blur, and magnetic axis snapping with trackpad haptic alignment—zero Chromium/Electron bloat.
 * **Instant Global Hotkey (`⌥ + Space`):** Registered via native macOS Carbon Event Manager (`RegisterEventHotKey`). Press `Option + Space` to summon or dismiss from any space or full-screen app.
 * **Zero-Discovery Host Environment Manifest:** Automatically captures your login shell `PATH` (`/bin/zsh -lc`, Homebrew, Node, Rust/Cargo, Python) once at startup and injects a pre-probed environment manifest into the system prompt so the agent never wastes turns guessing installed tools.
-* **Hermes Agent & OpenCode-Inspired Autonomous Tool Engine:**
+* **Autonomous Tool Engine:**
   * `run_command` — Stateful login-shell execution (`cd` persists across turns) with a 30s synchronous window and automatic promotion to tracked background jobs.
   * `job_status` / `job_cancel` — Monitor live stdout/stderr, PID, and exit codes of background builds or long-running scripts.
   * `render_pdf` & `pdf_info` — Native 1-call HTML/Markdown to PDF generation (`WKWebView.createPDF`) and reliable page count/metadata verification via macOS `PDFKit`.

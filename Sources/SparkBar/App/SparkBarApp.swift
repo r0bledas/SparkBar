@@ -104,6 +104,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         HotkeyManager.shared.registerDefaultHotkey()
 
+        if SettingsStore.shared.enableLocalAPIServer {
+            LocalAPIServer.shared.start(port: SettingsStore.shared.localAPIServerPort)
+        }
+
         // If launched automatically at login/restart, stay silent in the background until ⌥Space is pressed.
         // If launched manually by the user, show the floating bar right away.
         if !wasLaunchedAtStartup(notification) {
@@ -124,6 +128,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        LocalAPIServer.shared.stop()
         ChatViewModel.shared.persistCurrentSession()
     }
 

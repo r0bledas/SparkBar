@@ -191,6 +191,7 @@ public final class LLMStreamingClient {
         temperature: Double,
         reasoningEffort: String? = nil,
         enableServerSideSearch: Bool,
+        includeTools: Bool = true,
         onUpdate: @escaping @MainActor (String, String) -> Void
     ) async throws -> StreamDeltaResult {
         if provider.requiresAPIKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -216,6 +217,7 @@ public final class LLMStreamingClient {
                 apiKey: apiKey,
                 systemPrompt: systemPrompt,
                 temperature: temperature,
+                includeTools: includeTools,
                 onUpdate: onUpdate
             )
         } else {
@@ -229,6 +231,7 @@ public final class LLMStreamingClient {
                 temperature: temperature,
                 reasoningEffort: reasoningEffort,
                 enableServerSideSearch: enableServerSideSearch,
+                includeTools: includeTools,
                 onUpdate: onUpdate
             )
         }
@@ -247,6 +250,7 @@ public final class LLMStreamingClient {
         temperature: Double,
         reasoningEffort: String?,
         enableServerSideSearch: Bool,
+        includeTools: Bool,
         onUpdate: @escaping @MainActor (String, String) -> Void
     ) async throws -> StreamDeltaResult {
         let normalizedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -402,10 +406,12 @@ public final class LLMStreamingClient {
             body["reasoning_effort"] = effort
         }
 
-        let tools = ToolRegistry.activeToolsJSON()
-        if !tools.isEmpty {
-            body["tools"] = tools
-            body["tool_choice"] = "auto"
+        if includeTools {
+            let tools = ToolRegistry.activeToolsJSON()
+            if !tools.isEmpty {
+                body["tools"] = tools
+                body["tool_choice"] = "auto"
+            }
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -462,6 +468,7 @@ public final class LLMStreamingClient {
         apiKey: String,
         systemPrompt: String,
         temperature: Double,
+        includeTools: Bool,
         onUpdate: @escaping @MainActor (String, String) -> Void
     ) async throws -> StreamDeltaResult {
         let normalizedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -555,20 +562,22 @@ public final class LLMStreamingClient {
             body["system"] = systemPrompt
         }
 
-        let openAITools = ToolRegistry.activeToolsJSON()
-        if !openAITools.isEmpty {
-            let anthropicTools: [[String: Any]] = openAITools.compactMap { item in
-                guard let fn = item["function"] as? [String: Any],
-                      let name = fn["name"] as? String,
-                      let desc = fn["description"] as? String,
-                      let schema = fn["parameters"] as? [String: Any] else { return nil }
-                return [
-                    "name": name,
-                    "description": desc,
-                    "input_schema": schema
-                ]
+        if includeTools {
+            let openAITools = ToolRegistry.activeToolsJSON()
+            if !openAITools.isEmpty {
+                let anthropicTools: [[String: Any]] = openAITools.compactMap { item in
+                    guard let fn = item["function"] as? [String: Any],
+                          let name = fn["name"] as? String,
+                          let desc = fn["description"] as? String,
+                          let schema = fn["parameters"] as? [String: Any] else { return nil }
+                    return [
+                        "name": name,
+                        "description": desc,
+                        "input_schema": schema
+                    ]
+                }
+                body["tools"] = anthropicTools
             }
-            body["tools"] = anthropicTools
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
