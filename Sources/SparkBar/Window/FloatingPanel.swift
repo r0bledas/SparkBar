@@ -11,7 +11,7 @@ public final class FloatingPanel: NSPanel {
     public init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.nonactivatingPanel, .borderless, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -25,6 +25,7 @@ public final class FloatingPanel: NSPanel {
         self.backgroundColor = .clear
         self.isOpaque = false
         self.hasShadow = true
+        self.acceptsMouseMovedEvents = true
     }
 
     public override var canBecomeKey: Bool {
@@ -224,8 +225,8 @@ public final class PanelController: NSObject, NSWindowDelegate {
     public static let shared = PanelController()
 
     public static let panelWidth: CGFloat = 520
-    public static let collapsedHeight: CGFloat = 128
-    /// Once active with messages, the window is a 1:1 square (520 x 520)
+    public static let collapsedHeight: CGFloat = 105
+    /// Once active with messages, the window starts as a 1:1 square (520 x 520) and is freely resizable
     public static let maxExpandedHeight: CGFloat = 520
 
     private var panel: FloatingPanel?
@@ -234,6 +235,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
     /// Fixed bottom-left anchor point on the screen so the panel ALWAYS grows strictly from bottom-to-top
     /// without ever jumping up or down when sending a message or starting a new chat.
     private var anchoredBottomOrigin: NSPoint?
+    private var expandedSize: NSSize = NSSize(width: panelWidth, height: maxExpandedHeight)
     private var isUpdatingFrame: Bool = false
     private var globalMouseMonitor: Any?
     private var outsideMouseDownPoint: NSPoint?
@@ -339,8 +341,8 @@ public final class PanelController: NSObject, NSWindowDelegate {
             anchoredBottomOrigin = computeDefaultBottomAnchor()
         }
 
-        let targetHeight = currentTargetHeight()
-        applyAnchoredFrame(height: targetHeight, animate: false)
+        let target = currentTargetSize()
+        applyAnchoredFrame(size: target.size, isExpanded: target.isExpanded, animate: false)
 
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -355,25 +357,24 @@ public final class PanelController: NSObject, NSWindowDelegate {
         anchoredBottomOrigin = origin
     }
 
-    /// Strictly resizes the panel from bottom-to-top by keeping `frame.origin.y` locked at `anchoredBottomOrigin.y`.
-    public func syncPanelHeight(hasMessages: Bool) {
-        let targetHeight = currentTargetHeight()
-        applyAnchoredFrame(height: targetHeight, animate: false)
-    }
-
-    private func currentTargetHeight() -> CGFloat {
+    private func currentTargetSize() -> (size: NSSize, isExpanded: Bool) {
         let vm = ChatViewModel.shared
         let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil || vm.showHistory
         if hasMessages {
-            return Self.maxExpandedHeight
+            return (expandedSize, true)
         }
         if !vm.attachedImages.isEmpty {
-            return Self.collapsedHeight + 98
+            return (NSSize(width: Self.panelWidth, height: Self.collapsedHeight + 98), false)
         }
-        return Self.collapsedHeight
+        return (NSSize(width: Self.panelWidth, height: Self.collapsedHeight), false)
     }
 
-    private func applyAnchoredFrame(height: CGFloat, animate: Bool) {
+    public func syncPanelHeight(hasMessages: Bool) {
+        let target = currentTargetSize()
+        applyAnchoredFrame(size: target.size, isExpanded: target.isExpanded, animate: false)
+    }
+
+    private func applyAnchoredFrame(size: NSSize, isExpanded: Bool, animate: Bool) {
         guard let panel = panel else { return }
         let anchor: NSPoint
         if panel.isVisible, anchoredBottomOrigin != nil {
@@ -385,15 +386,23 @@ public final class PanelController: NSObject, NSWindowDelegate {
             anchoredBottomOrigin = anchor
         }
 
+        if isExpanded {
+            panel.minSize = NSSize(width: 440, height: 320)
+            panel.maxSize = NSSize(width: 1200, height: 1100)
+        } else {
+            panel.minSize = size
+            panel.maxSize = size
+        }
+
         let newFrame = NSRect(
             x: anchor.x,
             y: anchor.y,
-            width: Self.panelWidth,
-            height: height
+            width: size.width,
+            height: size.height
         )
 
         isUpdatingFrame = true
-        panel.contentView?.frame = NSRect(x: 0, y: 0, width: Self.panelWidth, height: height)
+        panel.contentView?.frame = NSRect(x: 0, y: 0, width: size.width, height: size.height)
         panel.setFrame(newFrame, display: true, animate: animate)
         panel.contentView?.needsLayout = true
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -419,6 +428,16 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
     public func windowDidMove(_ notification: Notification) {
         guard !isUpdatingFrame, let panel = panel, panel.isVisible else { return }
+        anchoredBottomOrigin = panel.frame.origin
+    }
+
+    public func windowDidResize(_ notification: Notification) {
+        guard !isUpdatingFrame, let panel = panel, panel.isVisible else { return }
+        let vm = ChatViewModel.shared
+        let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil || vm.showHistory
+        if hasMessages {
+            expandedSize = panel.frame.size
+        }
         anchoredBottomOrigin = panel.frame.origin
     }
 

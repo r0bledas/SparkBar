@@ -925,6 +925,7 @@ public struct FullScreenChatView: View {
 
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
+                        .equatable()
 
                     Rectangle()
                         .fill(Color.primary.opacity(0.14))

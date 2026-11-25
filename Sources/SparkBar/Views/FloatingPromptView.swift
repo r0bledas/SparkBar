@@ -15,6 +15,8 @@ public struct FloatingPromptView: View {
     @State private var isUserScrolledUp: Bool = false
     @State private var scrollToBottomTrigger: Int = 0
     @State private var scrollWheelMonitor: Any? = nil
+    @State private var mouseHoverMonitor: Any? = nil
+    @State private var isHoveringTopQuarter: Bool = false
     @State private var historySearchText: String = ""
     @State private var isDropTargeted: Bool = false
 
@@ -26,50 +28,18 @@ public struct FloatingPromptView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Top Window Control Bar: [Maximize (Full-Screen Window)] — [Drag Handle] — [× Hide]
-            HStack(spacing: 0) {
-                Button {
-                    FullScreenChatWindowController.shared.showWindow()
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open in Full-Screen Window (⌘⇧F)")
-                .accessibilityLabel("Open Full-Screen Window")
-
+            // 1. Top Conversation / History Area (Only appears when messages exist or History is toggled — collapsed bar stays minimal)
+            if hasActiveChatArea {
+                // Dedicated top window drag bar (outside the ScrollView, identical to bottomControlBar's drag handle)
                 WindowDragHandle()
-                    .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 22)
+                    .frame(maxWidth: .infinity, minHeight: 20, maxHeight: 20)
                     .overlay(
                         Capsule()
                             .fill(Color.primary.opacity(0.22))
-                            .frame(width: 36, height: 4)
+                            .frame(width: 38, height: 4.5)
                             .allowsHitTesting(false)
                     )
 
-                Button {
-                    PanelController.shared.hidePanel()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Hide SparkBar (Esc)")
-                .accessibilityLabel("Hide SparkBar")
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 2)
-            .frame(height: 24)
-            .background(WindowDragHandle())
-
-            // 1. Top Conversation / History Area (Appears above the prompt input when messages exist or History is toggled)
-            if hasActiveChatArea {
                 if viewModel.showHistory {
                     historyBrowserArea
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -123,7 +93,7 @@ public struct FloatingPromptView: View {
             bottomControlBar
                 .frame(height: 38)
         }
-        .frame(width: PanelController.panelWidth - 16)
+        .frame(maxWidth: .infinity)
         .background(
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, state: .active)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -133,6 +103,53 @@ public struct FloatingPromptView: View {
                 .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.16), lineWidth: isDropTargeted ? 2 : 1)
                 .allowsHitTesting(false)
         )
+        // Cornered circular Maximize (top-left) & Hide (top-right) buttons — revealed only when cursor is in the top 1/4 of the expanded window
+        .overlay(alignment: .top) {
+            if hasActiveChatArea && isHoveringTopQuarter {
+                HStack {
+                    Button {
+                        FullScreenChatWindowController.shared.showWindow()
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.primary.opacity(0.88))
+                            .frame(width: 26, height: 26)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.75)
+                            )
+                            .shadow(color: .black.opacity(0.26), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open in Full-Screen Window (⌘⇧F)")
+                    .accessibilityLabel("Open Full-Screen Window")
+
+                    Spacer()
+
+                    Button {
+                        PanelController.shared.hidePanel()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.primary.opacity(0.88))
+                            .frame(width: 26, height: 26)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.75)
+                            )
+                            .shadow(color: .black.opacity(0.26), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Hide SparkBar (Esc)")
+                    .accessibilityLabel("Hide SparkBar")
+                }
+                .padding(.top, 10)
+                .padding(.horizontal, 10)
+                .transition(.opacity)
+            }
+        }
         .overlayPreferenceValue(HoveredImageTooltipAnchorKey.self) { item in
             GeometryReader { geo in
                 if let item = item, !item.fileName.isEmpty {
@@ -184,16 +201,22 @@ public struct FloatingPromptView: View {
             isInputFocused = true
             PanelController.shared.syncPanelHeight(hasMessages: hasActiveChatArea)
             setupScrollMonitor()
+            setupTopQuarterHoverMonitor()
         }
         .onDisappear {
             if let monitor = scrollWheelMonitor {
                 NSEvent.removeMonitor(monitor)
                 scrollWheelMonitor = nil
             }
+            if let hoverMon = mouseHoverMonitor {
+                NSEvent.removeMonitor(hoverMon)
+                mouseHoverMonitor = nil
+            }
         }
         .onChange(of: hasActiveChatArea) { _, active in
             if !active {
                 isUserScrolledUp = false
+                isHoveringTopQuarter = false
             }
             PanelController.shared.syncPanelHeight(hasMessages: active)
         }
@@ -212,6 +235,28 @@ public struct FloatingPromptView: View {
                 // User scrolled upward away from the live bottom stream
                 if !isUserScrolledUp {
                     isUserScrolledUp = true
+                }
+            }
+            return event
+        }
+    }
+
+    private func setupTopQuarterHoverMonitor() {
+        guard mouseHoverMonitor == nil else { return }
+        mouseHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited]) { event in
+            guard let win = event.window, win is FloatingPanel else {
+                if isHoveringTopQuarter { isHoveringTopQuarter = false }
+                return event
+            }
+            let h = win.frame.height
+            let w = win.frame.width
+            let loc = event.locationInWindow
+            let inTopQuarter = (event.type != .mouseExited)
+                && loc.x >= 0 && loc.x <= w
+                && loc.y >= h * 0.75 && loc.y <= h
+            if isHoveringTopQuarter != inTopQuarter {
+                withAnimation(.easeInOut(duration: 0.14)) {
+                    isHoveringTopQuarter = inTopQuarter
                 }
             }
             return event
@@ -557,6 +602,7 @@ public struct FloatingPromptView: View {
                 // Assistant Markdown Response
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
+                        .equatable()
 
                     // Harder, more noticeable separator between the bot's content and the Copy Answer action bar
                     Rectangle()

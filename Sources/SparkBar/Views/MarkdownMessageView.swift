@@ -282,16 +282,63 @@ public enum MarkdownBlock: Identifiable, Equatable {
     }
 }
 
-public struct MarkdownMessageView: View {
+private final class CachedMarkdownBlocks: NSObject {
+    let blocks: [MarkdownBlock]
+    init(_ blocks: [MarkdownBlock]) { self.blocks = blocks }
+}
+
+private final class CachedAttributedText: NSObject {
+    let attributed: AttributedString
+    init(_ attributed: AttributedString) { self.attributed = attributed }
+}
+
+private final class MarkdownRenderCache: @unchecked Sendable {
+    static let shared = MarkdownRenderCache()
+    private let blocksCache = NSCache<NSString, CachedMarkdownBlocks>()
+    private let attrCache = NSCache<NSString, CachedAttributedText>()
+
+    private init() {
+        blocksCache.countLimit = 256
+        attrCache.countLimit = 512
+    }
+
+    func blocks(for text: String, build: () -> [MarkdownBlock]) -> [MarkdownBlock] {
+        let key = text as NSString
+        if let hit = blocksCache.object(forKey: key) {
+            return hit.blocks
+        }
+        let built = build()
+        blocksCache.setObject(CachedMarkdownBlocks(built), forKey: key)
+        return built
+    }
+
+    func attributed(for content: String, build: () -> AttributedString) -> AttributedString {
+        let key = content as NSString
+        if let hit = attrCache.object(forKey: key) {
+            return hit.attributed
+        }
+        let built = build()
+        attrCache.setObject(CachedAttributedText(built), forKey: key)
+        return built
+    }
+}
+
+public struct MarkdownMessageView: View, Equatable {
     public let text: String
     @State private var copiedBlockId: Int? = nil
+
+    public static func == (lhs: MarkdownMessageView, rhs: MarkdownMessageView) -> Bool {
+        lhs.text == rhs.text
+    }
 
     public init(text: String) {
         self.text = text
     }
 
     public var body: some View {
-        let groupedBlocks = Self.coalesceSelectableTextBlocks(Self.parseBlocks(from: text))
+        let groupedBlocks = MarkdownRenderCache.shared.blocks(for: text) {
+            Self.coalesceSelectableTextBlocks(Self.parseBlocks(from: text))
+        }
         VStack(alignment: .leading, spacing: 10) {
             ForEach(groupedBlocks) { block in
                 switch block {
@@ -500,7 +547,9 @@ public struct MarkdownMessageView: View {
     /// inside a SINGLE unified `Text(AttributedString)` view so the user can drag-select across newlines and paragraphs without hitting boundaries.
     @ViewBuilder
     private func renderedMultiParagraphText(_ rawContent: String) -> some View {
-        let unified = Self.buildUnifiedAttributedString(from: rawContent)
+        let unified = MarkdownRenderCache.shared.attributed(for: rawContent) {
+            Self.buildUnifiedAttributedString(from: rawContent)
+        }
         Text(unified)
             .font(.system(size: 14, weight: .regular))
             .lineSpacing(3)
