@@ -26,18 +26,50 @@ public struct FloatingPromptView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // 1. Top Conversation / History Area (Appears above the prompt input when messages exist or History is toggled)
-            if hasActiveChatArea {
-                // Dedicated top window drag bar (outside the ScrollView, identical to bottomControlBar's drag handle)
+            // Top Window Control Bar: [Maximize (Full-Screen Window)] — [Drag Handle] — [× Hide]
+            HStack(spacing: 0) {
+                Button {
+                    FullScreenChatWindowController.shared.showWindow()
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open in Full-Screen Window (⌘⇧F)")
+                .accessibilityLabel("Open Full-Screen Window")
+
                 WindowDragHandle()
-                    .frame(maxWidth: .infinity, minHeight: 20, maxHeight: 20)
+                    .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 22)
                     .overlay(
                         Capsule()
                             .fill(Color.primary.opacity(0.22))
-                            .frame(width: 38, height: 4.5)
+                            .frame(width: 36, height: 4)
                             .allowsHitTesting(false)
                     )
 
+                Button {
+                    PanelController.shared.hidePanel()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Hide SparkBar (Esc)")
+                .accessibilityLabel("Hide SparkBar")
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 2)
+            .frame(height: 24)
+            .background(WindowDragHandle())
+
+            // 1. Top Conversation / History Area (Appears above the prompt input when messages exist or History is toggled)
+            if hasActiveChatArea {
                 if viewModel.showHistory {
                     historyBrowserArea
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1281,7 +1313,7 @@ public struct FloatingPromptView: View {
 /// Compact thumbnail-only preview for an attached image:
 /// - Instantly shows a top-right `×` remove badge on hover.
 /// - Instantly pops up a comment-style speech bubble above the thumbnail stating the filename on hover, on the top layer.
-private struct AttachedImageThumbnailView: View {
+struct AttachedImageThumbnailView: View {
     let image: AttachedImage
     let onRemove: () -> Void
 
@@ -1346,12 +1378,12 @@ private struct AttachedImageThumbnailView: View {
     }
 }
 
-private struct HoveredImageTooltipData {
+struct HoveredImageTooltipData {
     let fileName: String
     let bounds: Anchor<CGRect>
 }
 
-private struct HoveredImageTooltipAnchorKey: PreferenceKey {
+struct HoveredImageTooltipAnchorKey: PreferenceKey {
     static var defaultValue: HoveredImageTooltipData? = nil
     static func reduce(value: inout HoveredImageTooltipData?, nextValue: () -> HoveredImageTooltipData?) {
         if let next = nextValue() {
@@ -1360,7 +1392,7 @@ private struct HoveredImageTooltipAnchorKey: PreferenceKey {
     }
 }
 
-private struct SpeechBubblePointer: Shape {
+struct SpeechBubblePointer: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
@@ -1371,7 +1403,7 @@ private struct SpeechBubblePointer: Shape {
     }
 }
 
-private struct SpeechBubblePointerStroke: Shape {
+struct SpeechBubblePointerStroke: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
@@ -1384,7 +1416,7 @@ private struct SpeechBubblePointerStroke: Shape {
 /// Multi-line wrapping text input view backed by `SparkBarFieldEditor` inside a fixed-height `NSScrollView`.
 /// Wraps text by lines so the typing caret is never hidden horizontally, auto-scrolls vertically,
 /// submits on `Return`, and inserts a newline on `Shift + Return`.
-private struct WrappingPromptTextView: NSViewRepresentable {
+struct WrappingPromptTextView: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
     let onSubmit: () -> Void

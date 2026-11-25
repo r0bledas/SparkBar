@@ -85,6 +85,10 @@ public final class FloatingPanel: NSPanel {
                 SettingsWindowController.shared.showWindow()
                 return true
             }
+            if char == "f" && event.modifierFlags.contains(.shift) {
+                FullScreenChatWindowController.shared.showWindow()
+                return true
+            }
             if char == "v" {
                 if ChatViewModel.shared.checkAndAttachPasteboardImage() {
                     return true
@@ -220,7 +224,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
     public static let shared = PanelController()
 
     public static let panelWidth: CGFloat = 520
-    public static let collapsedHeight: CGFloat = 105
+    public static let collapsedHeight: CGFloat = 128
     /// Once active with messages, the window is a 1:1 square (520 x 520)
     public static let maxExpandedHeight: CGFloat = 520
 

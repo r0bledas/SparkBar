@@ -154,6 +154,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
         appMenu.addItem(withTitle: "New Chat", action: #selector(clearConversationAction), keyEquivalent: "n")
+        appMenu.addItem(withTitle: "Open Full Window", action: #selector(openFullScreenWindowAction), keyEquivalent: "F")
         appMenu.addItem(withTitle: "Conversation History…", action: #selector(toggleHistoryAction), keyEquivalent: "y")
         appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAction), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
@@ -212,6 +213,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.keyEquivalentModifierMask = [.option]
         toggleItem.target = self
         menu.addItem(toggleItem)
+
+        let fullWindowItem = NSMenuItem(
+            title: "Open Full Window",
+            action: #selector(openFullScreenWindowAction),
+            keyEquivalent: "f"
+        )
+        fullWindowItem.keyEquivalentModifierMask = [.command, .shift]
+        fullWindowItem.target = self
+        menu.addItem(fullWindowItem)
 
         let closeItem = NSMenuItem(
             title: "Close Panel",
@@ -293,6 +303,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePanelAction() {
         PanelController.shared.togglePanel()
+    }
+
+    @objc private func openFullScreenWindowAction() {
+        FullScreenChatWindowController.shared.showWindow()
     }
 
     @objc private func closePanelAction() {
