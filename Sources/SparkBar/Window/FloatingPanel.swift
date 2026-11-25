@@ -11,7 +11,7 @@ public final class FloatingPanel: NSPanel {
     public init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.nonactivatingPanel, .borderless, .resizable],
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
@@ -235,7 +235,6 @@ public final class PanelController: NSObject, NSWindowDelegate {
     /// Fixed bottom-left anchor point on the screen so the panel ALWAYS grows strictly from bottom-to-top
     /// without ever jumping up or down when sending a message or starting a new chat.
     private var anchoredBottomOrigin: NSPoint?
-    private var expandedSize: NSSize = NSSize(width: panelWidth, height: maxExpandedHeight)
     private var isUpdatingFrame: Bool = false
     private var globalMouseMonitor: Any?
     private var outsideMouseDownPoint: NSPoint?
@@ -361,7 +360,7 @@ public final class PanelController: NSObject, NSWindowDelegate {
         let vm = ChatViewModel.shared
         let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil || vm.showHistory
         if hasMessages {
-            return (expandedSize, true)
+            return (NSSize(width: Self.panelWidth, height: Self.maxExpandedHeight), true)
         }
         if !vm.attachedImages.isEmpty {
             return (NSSize(width: Self.panelWidth, height: Self.collapsedHeight + 98), false)
@@ -384,14 +383,6 @@ public final class PanelController: NSObject, NSWindowDelegate {
         } else {
             anchor = anchoredBottomOrigin ?? computeDefaultBottomAnchor()
             anchoredBottomOrigin = anchor
-        }
-
-        if isExpanded {
-            panel.minSize = NSSize(width: 440, height: 320)
-            panel.maxSize = NSSize(width: 1200, height: 1100)
-        } else {
-            panel.minSize = size
-            panel.maxSize = size
         }
 
         let newFrame = NSRect(
@@ -428,16 +419,6 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
     public func windowDidMove(_ notification: Notification) {
         guard !isUpdatingFrame, let panel = panel, panel.isVisible else { return }
-        anchoredBottomOrigin = panel.frame.origin
-    }
-
-    public func windowDidResize(_ notification: Notification) {
-        guard !isUpdatingFrame, let panel = panel, panel.isVisible else { return }
-        let vm = ChatViewModel.shared
-        let hasMessages = !vm.messages.isEmpty || vm.errorMessage != nil || vm.activeToolStatus != nil || vm.showHistory
-        if hasMessages {
-            expandedSize = panel.frame.size
-        }
         anchoredBottomOrigin = panel.frame.origin
     }
 

@@ -93,7 +93,7 @@ public struct FloatingPromptView: View {
             bottomControlBar
                 .frame(height: 38)
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: PanelController.panelWidth - 16)
         .background(
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, state: .active)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

@@ -33,7 +33,11 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
             win.title = "SparkBar"
             win.titleVisibility = .hidden
             win.titlebarAppearsTransparent = true
+            let toolbar = NSToolbar(identifier: "SparkBarFullScreenToolbar")
+            toolbar.showsBaselineSeparator = false
+            win.toolbar = toolbar
             win.toolbarStyle = .unified
+            win.isMovableByWindowBackground = false
             win.minSize = NSSize(width: 780, height: 540)
             win.contentViewController = hostingController
             win.isReleasedWhenClosed = false
@@ -52,6 +56,12 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
 
+        if let lastUserMsgId = ChatViewModel.shared.messages.last(where: { $0.role == .user })?.id {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                ChatViewModel.shared.scrollToMessageTrigger.send(lastUserMsgId)
+            }
+        }
+
         if enterFullScreen, let win = window, !win.styleMask.contains(.fullScreen) {
             win.toggleFullScreen(nil)
         }
@@ -66,8 +76,25 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
     }
 }
 
-/// Custom `NSWindow` subclass supporting `⌘V` image pasting and standard SparkBar shortcuts (`⌘N`, `⌘,`).
+/// Custom `NSWindow` subclass supporting native macOS titlebar double-click to expand/zoom,
+/// `⌘V` image pasting, and standard SparkBar shortcuts (`⌘N`, `⌘,`).
 private final class FullScreenChatNSWindow: NSWindow {
+    override func sendEvent(_ event: NSEvent) {
+        // Native macOS double-click on the titlebar / top bar expands (zooms) the window
+        if event.type == .leftMouseUp && event.clickCount == 2 {
+            let titlebarHeight: CGFloat = 38
+            if event.locationInWindow.y >= frame.height - titlebarHeight {
+                // Only zoom if not clicking an interactive control (button / text field)
+                let hit = contentView?.hitTest(event.locationInWindow)
+                if !(hit is NSControl) {
+                    performZoom(nil)
+                    return
+                }
+            }
+        }
+        super.sendEvent(event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command) {
             let char = event.charactersIgnoringModifiers?.lowercased()
