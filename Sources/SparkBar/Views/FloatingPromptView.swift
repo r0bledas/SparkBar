@@ -639,7 +639,6 @@ public struct FloatingPromptView: View {
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
                         .equatable()
-                        .equatable()
 
                     // Harder, more noticeable separator between the bot's content and the Copy Answer action bar
                     Rectangle()
