@@ -56,12 +56,12 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
         }
-        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
         DispatchQueue.main.async { [weak self] in
-            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
             NSApp.activate(ignoringOtherApps: true)
             self?.window?.makeKeyAndOrderFront(nil)
         }

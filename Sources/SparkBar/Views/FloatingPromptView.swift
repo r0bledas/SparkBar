@@ -121,30 +121,10 @@ public struct FloatingPromptView: View {
                 .strokeBorder(isDropTargeted ? Color.accentColor : Color.primary.opacity(0.16), lineWidth: isDropTargeted ? 2 : 1)
                 .allowsHitTesting(false)
         )
-        // Cornered circular Maximize (top-left) & Hide (top-right) buttons — revealed only when cursor is in the top 1/4 of the expanded window
+        // Cornered circular Close (top-left) & Expand (top-right) buttons — revealed only when cursor is in the top 1/4 of the expanded window
         .overlay(alignment: .top) {
             if hasActiveChatArea && isHoveringTopQuarter {
                 HStack {
-                    Button {
-                        FullScreenChatWindowController.shared.showWindow()
-                    } label: {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.primary.opacity(0.88))
-                            .frame(width: 26, height: 26)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.75)
-                            )
-                            .shadow(color: .black.opacity(0.26), radius: 4, x: 0, y: 2)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open in Full-Screen Window (⌘⇧F)")
-                    .accessibilityLabel("Open Full-Screen Window")
-
-                    Spacer()
-
                     Button {
                         PanelController.shared.hidePanel()
                     } label: {
@@ -162,6 +142,26 @@ public struct FloatingPromptView: View {
                     .buttonStyle(.plain)
                     .help("Hide SparkBar (Esc)")
                     .accessibilityLabel("Hide SparkBar")
+
+                    Spacer()
+
+                    Button {
+                        FullScreenChatWindowController.shared.showWindow()
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.primary.opacity(0.88))
+                            .frame(width: 26, height: 26)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.75)
+                            )
+                            .shadow(color: .black.opacity(0.26), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open in Full-Screen Window (⌘⇧F)")
+                    .accessibilityLabel("Open Full-Screen Window")
                 }
                 .padding(.top, 10)
                 .padding(.horizontal, 10)

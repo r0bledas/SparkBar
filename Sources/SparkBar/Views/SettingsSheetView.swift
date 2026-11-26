@@ -40,7 +40,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
         }
-        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
