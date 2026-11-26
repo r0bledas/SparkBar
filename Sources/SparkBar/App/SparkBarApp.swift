@@ -332,7 +332,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func closePanelAction() {
-        PanelController.shared.hidePanel()
+        if let keyWindow = NSApp.keyWindow, !(keyWindow is FloatingPanel) {
+            keyWindow.performClose(nil)
+        } else {
+            PanelController.shared.hidePanel()
+        }
     }
 
     @objc private func clearConversationAction() {

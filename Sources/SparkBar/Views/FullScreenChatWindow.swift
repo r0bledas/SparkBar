@@ -114,6 +114,10 @@ private final class FullScreenChatNSWindow: NSWindow {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command) {
             let char = event.charactersIgnoringModifiers?.lowercased()
+            if char == "w" {
+                performClose(nil)
+                return true
+            }
             if char == "n" {
                 ChatViewModel.shared.startNewConversation()
                 return true
