@@ -253,6 +253,7 @@ public struct FloatingPromptView: View {
     private func setupScrollMonitor() {
         guard scrollWheelMonitor == nil else { return }
         scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            guard event.window is FloatingPanel else { return event }
             if event.scrollingDeltaY > 2.0 {
                 // User scrolled upward away from the live bottom stream
                 if !isUserScrolledUp {
@@ -266,13 +267,15 @@ public struct FloatingPromptView: View {
     private func setupTopQuarterHoverMonitor() {
         if mouseHoverMonitor == nil {
             mouseHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited, .leftMouseDragged]) { event in
+                guard event.window is FloatingPanel else { return event }
                 evaluateTopQuarterHover()
                 return event
             }
         }
         if globalMouseHoverMonitor == nil {
             globalMouseHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { _ in
-                Task { @MainActor in
+                DispatchQueue.main.async {
+                    guard PanelController.shared.currentPanelFrame != nil else { return }
                     evaluateTopQuarterHover()
                 }
             }
@@ -380,7 +383,7 @@ public struct FloatingPromptView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         let items = visibleMessages
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                             messageRow(for: msg)
@@ -490,7 +493,7 @@ public struct FloatingPromptView: View {
                 }
             }
             .onChange(of: viewModel.messages.last?.content) { _, _ in
-                guard !isUserScrolledUp else { return }
+                guard !isUserScrolledUp && viewModel.isStreaming else { return }
                 proxy.scrollTo("stream_bottom_anchor", anchor: .bottom)
             }
             .onChange(of: visibleMessages.count) { _, _ in
@@ -635,6 +638,7 @@ public struct FloatingPromptView: View {
                 // Assistant Markdown Response
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
+                        .equatable()
                         .equatable()
 
                     // Harder, more noticeable separator between the bot's content and the Copy Answer action bar

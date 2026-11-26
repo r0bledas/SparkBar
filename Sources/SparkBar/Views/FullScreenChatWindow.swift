@@ -464,7 +464,7 @@ public struct FullScreenChatView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         let items = visibleMessages
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                             messageRow(for: msg)
@@ -571,7 +571,7 @@ public struct FullScreenChatView: View {
                 }
             }
             .onChange(of: viewModel.messages.last?.content) { _, _ in
-                guard !isUserScrolledUp else { return }
+                guard !isUserScrolledUp && viewModel.isStreaming else { return }
                 proxy.scrollTo("fs_stream_bottom_anchor", anchor: .bottom)
             }
             .onChange(of: visibleMessages.count) { _, _ in
@@ -998,6 +998,7 @@ public struct FullScreenChatView: View {
 
                 if !message.content.isEmpty {
                     MarkdownMessageView(text: message.content)
+                        .equatable()
                         .equatable()
 
                     Rectangle()
