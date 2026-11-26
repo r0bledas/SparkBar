@@ -207,12 +207,6 @@ public final class ChatViewModel: ObservableObject {
         pendingModelSwitchNote = nil
         ConversationStore.shared.activeSessionId = session.id
         PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty)
-
-        if let lastUserMsgId = messages.last(where: { $0.role == .user })?.id {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
-                self?.scrollToMessageTrigger.send(lastUserMsgId)
-            }
-        }
     }
 
     /// Inserts or replaces an inline divider when the user switches models mid-conversation,

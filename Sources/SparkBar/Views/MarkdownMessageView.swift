@@ -628,6 +628,21 @@ public struct MarkdownMessageView: View, Equatable {
         return styleLinks(in: result)
     }
 
+    private static let linkDetector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    private static let regexCacheLock = NSLock()
+    private static var compiledRegexCache: [String: NSRegularExpression] = [:]
+
+    private static func cachedRegex(_ pattern: String) -> NSRegularExpression? {
+        regexCacheLock.lock()
+        defer { regexCacheLock.unlock() }
+        if let existing = compiledRegexCache[pattern] {
+            return existing
+        }
+        guard let compiled = try? NSRegularExpression(pattern: pattern) else { return nil }
+        compiledRegexCache[pattern] = compiled
+        return compiled
+    }
+
     /// Auto-links bare `https://` / `http://` URLs and styles all hyperlinks with bright macOS link color + single underline
     /// so every clickable link stands out unmistakably inside the translucent HUD panel.
     private static func styleLinks(in input: AttributedString) -> AttributedString {
@@ -635,8 +650,8 @@ public struct MarkdownMessageView: View, Equatable {
 
         // 1. Auto-detect bare URLs inside plain text that aren't already Markdown links
         let plainText = String(attr.characters)
-        if plainText.contains("http://") || plainText.contains("https://"),
-           let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+        if (plainText.contains("http://") || plainText.contains("https://")),
+           let detector = Self.linkDetector {
             let nsRange = NSRange(plainText.startIndex..<plainText.endIndex, in: plainText)
             for match in detector.matches(in: plainText, options: [], range: nsRange) {
                 guard let url = match.url,
@@ -666,6 +681,7 @@ public struct MarkdownMessageView: View, Equatable {
     // MARK: - LaTeX to Unicode Mathematical Formatter
 
     public static func convertInlineLaTeXInText(_ input: String) -> String {
+        guard input.contains("$") || input.contains("\\") else { return input }
         var result = input
 
         // Replace `\[ ... \]` and `$$ ... $$` inline occurrences
@@ -687,7 +703,7 @@ public struct MarkdownMessageView: View, Equatable {
     }
 
     private static func replaceRegexMatches(in text: String, pattern: String, transform: (String) -> String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        guard let regex = Self.cachedRegex(pattern) else { return text }
         var out = text
         let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
         for match in matches {

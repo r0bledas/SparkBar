@@ -66,12 +66,6 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
             self?.window?.makeKeyAndOrderFront(nil)
         }
 
-        if let lastUserMsgId = ChatViewModel.shared.messages.last(where: { $0.role == .user })?.id {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                ChatViewModel.shared.scrollToMessageTrigger.send(lastUserMsgId)
-            }
-        }
-
         if enterFullScreen, let win = window, !win.styleMask.contains(.fullScreen) {
             win.toggleFullScreen(nil)
         }
@@ -546,6 +540,8 @@ public struct FullScreenChatView: View {
                     .padding(.vertical, 20)
                     .frame(maxWidth: .infinity)
                 }
+                .defaultScrollAnchor(.bottom)
+                .id(viewModel.currentSessionId)
 
                 if isUserScrolledUp {
                     Button {

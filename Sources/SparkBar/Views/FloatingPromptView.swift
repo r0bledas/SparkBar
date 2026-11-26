@@ -467,6 +467,8 @@ public struct FloatingPromptView: View {
                     .padding(.top, 28)
                     .padding(.bottom, 14)
                 }
+                .defaultScrollAnchor(.bottom)
+                .id(viewModel.currentSessionId)
 
                 // Centered floating down-arrow button above the "Ask anything" bar when user scrolls up
                 if isUserScrolledUp {
