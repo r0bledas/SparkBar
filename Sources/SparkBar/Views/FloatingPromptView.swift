@@ -20,6 +20,7 @@ public struct FloatingPromptView: View {
     @State private var isHoveringTopQuarter: Bool = false
     @State private var historySearchText: String = ""
     @State private var isDropTargeted: Bool = false
+    @State private var renderedMessageLimit: Int = 30
 
     public init() {}
 
@@ -384,7 +385,29 @@ public struct FloatingPromptView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        let items = visibleMessages
+                        let allItems = visibleMessages
+                        let hiddenCount = max(0, allItems.count - renderedMessageLimit)
+                        let items = hiddenCount > 0 ? Array(allItems.suffix(renderedMessageLimit)) : allItems
+
+                        if hiddenCount > 0 {
+                            HStack {
+                                Spacer()
+                                Button {
+                                    renderedMessageLimit += 40
+                                } label: {
+                                    Label("Load earlier (\(hiddenCount) more)", systemImage: "arrow.up.circle")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(Color.primary.opacity(0.06), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                Spacer()
+                            }
+                            .padding(.bottom, 10)
+                        }
+
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                             messageRow(for: msg)
                                 .id(msg.id)
@@ -469,6 +492,9 @@ public struct FloatingPromptView: View {
                 }
                 .defaultScrollAnchor(.bottom)
                 .id(viewModel.currentSessionId)
+                .onChange(of: viewModel.currentSessionId) { _, _ in
+                    renderedMessageLimit = 30
+                }
 
                 // Centered floating down-arrow button above the "Ask anything" bar when user scrolls up
                 if isUserScrolledUp {

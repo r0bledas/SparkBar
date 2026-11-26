@@ -52,6 +52,9 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
         PanelController.shared.hidePanel()
         ChatViewModel.shared.showHistory = false
 
+        // Pre-warm Markdown caches in the background for recent sessions so clicking any chat is instant
+        MarkdownMessageView.prewarm(sessions: ConversationStore.shared.sessions)
+
         // Promote to a regular foreground app while the main window is open so macOS gives it full focus & menu bar ownership
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
@@ -146,6 +149,7 @@ public struct FullScreenChatView: View {
     @State private var copiedToolOutputId: UUID? = nil
     @State private var isUserScrolledUp: Bool = false
     @State private var isDropTargeted: Bool = false
+    @State private var renderedMessageLimit: Int = 30
 
     public init() {}
 
@@ -459,7 +463,29 @@ public struct FullScreenChatView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        let items = visibleMessages
+                        let allItems = visibleMessages
+                        let hiddenCount = max(0, allItems.count - renderedMessageLimit)
+                        let items = hiddenCount > 0 ? Array(allItems.suffix(renderedMessageLimit)) : allItems
+
+                        if hiddenCount > 0 {
+                            HStack {
+                                Spacer()
+                                Button {
+                                    renderedMessageLimit += 40
+                                } label: {
+                                    Label("Load earlier messages (\(hiddenCount) more)", systemImage: "arrow.up.circle")
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.primary.opacity(0.06), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                Spacer()
+                            }
+                            .padding(.bottom, 14)
+                        }
+
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, msg in
                             messageRow(for: msg)
                                 .id(msg.id)
@@ -542,6 +568,9 @@ public struct FullScreenChatView: View {
                 }
                 .defaultScrollAnchor(.bottom)
                 .id(viewModel.currentSessionId)
+                .onChange(of: viewModel.currentSessionId) { _, _ in
+                    renderedMessageLimit = 30
+                }
 
                 if isUserScrolledUp {
                     Button {

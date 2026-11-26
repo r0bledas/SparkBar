@@ -298,8 +298,8 @@ private final class MarkdownRenderCache: @unchecked Sendable {
     private let attrCache = NSCache<NSString, CachedAttributedText>()
 
     private init() {
-        blocksCache.countLimit = 256
-        attrCache.countLimit = 512
+        blocksCache.countLimit = 400
+        attrCache.countLimit = 800
     }
 
     func blocks(for text: String, build: () -> [MarkdownBlock]) -> [MarkdownBlock] {
@@ -333,6 +333,32 @@ public struct MarkdownMessageView: View, Equatable {
 
     public init(text: String) {
         self.text = text
+    }
+
+    /// Background pre-warmer: parses Markdown blocks and builds cached `AttributedString`s off the main thread
+    /// for the most recent sessions so clicking a chat in History opens instantaneously.
+    public static func prewarm(sessions: [ConversationSession], maxSessions: Int = 5, maxMessagesPerSession: Int = 30) {
+        let texts: [String] = sessions.prefix(maxSessions).flatMap { session in
+            session.messages
+                .suffix(maxMessagesPerSession)
+                .filter { $0.role == .assistant && !$0.content.isEmpty }
+                .map { $0.content }
+        }
+        guard !texts.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for text in texts {
+                let grouped = MarkdownRenderCache.shared.blocks(for: text) {
+                    Self.coalesceSelectableTextBlocks(Self.parseBlocks(from: text))
+                }
+                for block in grouped {
+                    if case .text(_, let content) = block {
+                        _ = MarkdownRenderCache.shared.attributed(for: content) {
+                            Self.buildUnifiedAttributedString(from: content)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public var body: some View {

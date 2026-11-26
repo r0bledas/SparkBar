@@ -119,6 +119,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             LocalAPIServer.shared.start(port: SettingsStore.shared.localAPIServerPort)
         }
 
+        // Warm Markdown render cache for recent conversations on a background utility thread
+        MarkdownMessageView.prewarm(sessions: ConversationStore.shared.sessions)
+
         // If launched automatically at login/restart, stay silent in the background until ⌥Space is pressed.
         // If launched manually by the user (e.g. from /Applications), open and focus the main full-size window.
         if !wasLaunchedAtStartup(notification) {
