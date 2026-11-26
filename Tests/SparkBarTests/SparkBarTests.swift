@@ -482,5 +482,27 @@ final class SparkBarTests: XCTestCase {
         XCTAssertEqual((errResp as? HTTPURLResponse)?.statusCode, 400)
         let errJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: errData) as? [String: Any])
         XCTAssertEqual(errJSON["type"] as? String, "error")
+
+        // GET /v1beta/models (Gemini REST)
+        let (gemModelsData, gemModelsResp) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(testPort)/v1beta/models")!)
+        XCTAssertEqual((gemModelsResp as? HTTPURLResponse)?.statusCode, 200)
+        let gemModelsJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: gemModelsData) as? [String: Any])
+        let gemModels = try XCTUnwrap(gemModelsJSON["models"] as? [[String: Any]])
+        XCTAssertFalse(gemModels.isEmpty)
+
+        // POST /v1/responses, /v1/completions, /completion, /v1beta/models/default:generateContent validation
+        for endpoint in ["/v1/responses", "/v1/completions", "/completion", "/v1beta/models/default:generateContent"] {
+            var req = URLRequest(url: URL(string: "http://127.0.0.1:\(testPort)\(endpoint)")!)
+            req.httpMethod = "POST"
+            req.httpBody = Data("{}".utf8)
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            XCTAssertEqual((resp as? HTTPURLResponse)?.statusCode, 400, "Expected 400 for empty payload on \(endpoint)")
+        }
+
+        // Verify local providers list & optional API keys
+        XCTAssertEqual(LLMProviderType.localProviders, [.ollama, .llamacpp, .lmstudio, .mlx, .custom])
+        for localProvider in LLMProviderType.localProviders {
+            XCTAssertFalse(localProvider.requiresAPIKey, "\(localProvider.rawValue) should not require an API key")
+        }
     }
 }

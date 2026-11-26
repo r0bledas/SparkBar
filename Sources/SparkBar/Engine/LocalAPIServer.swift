@@ -224,9 +224,11 @@ public final class LocalAPIServer: ObservableObject {
                 "provider": SettingsStore.shared.selectedProvider.rawValue,
                 "active_model": resolvedModelId(requested: nil),
                 "endpoints": [
-                    "openai": ["GET /v1/models", "POST /v1/chat/completions"],
+                    "openai": ["GET /v1/models", "POST /v1/chat/completions", "POST /v1/responses", "POST /v1/completions"],
                     "anthropic": ["POST /v1/messages"],
-                    "ollama": ["GET /api/tags", "GET /api/version", "POST /api/chat", "POST /api/generate"]
+                    "ollama": ["GET /api/tags", "GET /api/version", "POST /api/show", "POST /api/chat", "POST /api/generate"],
+                    "gemini": ["GET /v1beta/models", "POST /v1beta/models/{model}:generateContent", "POST /v1beta/models/{model}:streamGenerateContent"],
+                    "llamacpp": ["POST /completion"]
                 ]
             ]
             sendJSONResponse(on: connection, statusCode: 200, statusText: "OK", object: payload)
@@ -238,9 +240,23 @@ public final class LocalAPIServer: ObservableObject {
         case ("POST", "/v1/chat/completions"), ("POST", "/chat/completions"):
             await handleOpenAIChatCompletions(request, on: connection)
 
+        case ("POST", "/v1/responses"), ("POST", "/responses"):
+            await handleOpenAIResponses(request, on: connection)
+
+        case ("POST", "/v1/completions"), ("POST", "/completions"):
+            await handleOpenAILegacyCompletions(request, on: connection)
+
+        // llama.cpp native completion endpoint
+        case ("POST", "/completion"):
+            await handleLlamaCppCompletion(request, on: connection)
+
         // Anthropic-compatible
         case ("POST", "/v1/messages"), ("POST", "/messages"):
             await handleAnthropicMessages(request, on: connection)
+
+        // Google Gemini REST-compatible
+        case ("GET", "/v1beta/models"):
+            sendJSONResponse(on: connection, statusCode: 200, statusText: "OK", object: buildGeminiModelsPayload())
 
         // Ollama-compatible
         case ("GET", "/api/tags"):
@@ -282,6 +298,18 @@ public final class LocalAPIServer: ObservableObject {
             await handleOllamaGenerate(request, on: connection)
 
         default:
+            if request.method == "POST", path.hasPrefix("/v1beta/models/") {
+                let tail = String(path.dropFirst("/v1beta/models/".count))
+                if tail.hasSuffix(":generateContent") {
+                    let modelName = String(tail.dropLast(":generateContent".count))
+                    await handleGeminiGenerateContent(request, modelInPath: modelName, stream: false, on: connection)
+                    return
+                } else if tail.hasSuffix(":streamGenerateContent") {
+                    let modelName = String(tail.dropLast(":streamGenerateContent".count))
+                    await handleGeminiGenerateContent(request, modelInPath: modelName, stream: true, on: connection)
+                    return
+                }
+            }
             sendJSONResponse(
                 on: connection,
                 statusCode: 404,
@@ -355,6 +383,17 @@ public final class LocalAPIServer: ObservableObject {
                     "parameter_size": "cloud",
                     "quantization_level": "none"
                 ]
+            ]
+        }
+        return ["models": models]
+    }
+
+    public func buildGeminiModelsPayload() -> [String: Any] {
+        let models: [[String: Any]] = exposedModelEntries().map { item in
+            [
+                "name": "models/\(item.id)",
+                "displayName": item.id,
+                "supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
             ]
         }
         return ["models": models]
@@ -516,6 +555,368 @@ public final class LocalAPIServer: ObservableObject {
                     statusCode: 500,
                     statusText: "Internal Server Error",
                     object: ["error": ["message": error.localizedDescription, "type": "server_error"]]
+                )
+            }
+        }
+    }
+
+    // MARK: - OpenAI Responses API (/v1/responses)
+
+    private func handleOpenAIResponses(_ request: HTTPRequest, on connection: NWConnection) async {
+        guard let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["message": "Invalid JSON body.", "type": "invalid_request_error"]]
+            )
+            return
+        }
+
+        let modelId = resolvedModelId(requested: json["model"] as? String)
+        let stream = (json["stream"] as? Bool) ?? false
+        let temperature = (json["temperature"] as? Double) ?? SettingsStore.shared.temperature
+        var systemPrompt = (json["instructions"] as? String) ?? ""
+        var chatMessages: [ChatMessage] = []
+
+        if let inputStr = json["input"] as? String, !inputStr.isEmpty {
+            chatMessages.append(ChatMessage(role: .user, content: inputStr))
+        } else if let inputArray = json["input"] as? [[String: Any]] {
+            let (sys, msgs) = Self.extractOpenAIMessages(inputArray)
+            if !sys.isEmpty {
+                systemPrompt = systemPrompt.isEmpty ? sys : "\(systemPrompt)\n\n\(sys)"
+            }
+            chatMessages = msgs
+        }
+
+        guard !chatMessages.isEmpty else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["message": "Field `input` must not be empty.", "type": "invalid_request_error"]]
+            )
+            return
+        }
+
+        let responseId = "resp_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(20))"
+        let messageId = "msg_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(20))"
+        let createdAt = Int(Date().timeIntervalSince1970)
+
+        if stream {
+            sendStreamHeaders(on: connection, contentType: "text/event-stream; charset=utf-8")
+            sendAnthropicSSE(on: connection, event: "response.created", object: [
+                "type": "response.created",
+                "response": [
+                    "id": responseId,
+                    "object": "response",
+                    "created_at": createdAt,
+                    "status": "in_progress",
+                    "model": modelId,
+                    "output": []
+                ]
+            ])
+            do {
+                let fullText = try await executeBackend(
+                    systemPrompt: systemPrompt,
+                    messages: chatMessages,
+                    model: modelId,
+                    temperature: temperature
+                ) { delta in
+                    self.sendAnthropicSSE(on: connection, event: "response.output_text.delta", object: [
+                        "type": "response.output_text.delta",
+                        "item_id": messageId,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": delta
+                    ])
+                }
+
+                sendAnthropicSSE(on: connection, event: "response.output_text.done", object: [
+                    "type": "response.output_text.done",
+                    "item_id": messageId,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "text": fullText
+                ])
+                sendAnthropicSSE(on: connection, event: "response.completed", object: [
+                    "type": "response.completed",
+                    "response": [
+                        "id": responseId,
+                        "object": "response",
+                        "created_at": createdAt,
+                        "status": "completed",
+                        "model": modelId,
+                        "output_text": fullText,
+                        "output": [[
+                            "id": messageId,
+                            "type": "message",
+                            "status": "completed",
+                            "role": "assistant",
+                            "content": [["type": "output_text", "text": fullText, "annotations": []]]
+                        ]]
+                    ]
+                ], closeAfter: true)
+            } catch {
+                sendAnthropicSSE(on: connection, event: "error", object: [
+                    "type": "error",
+                    "error": ["message": error.localizedDescription, "type": "server_error"]
+                ], closeAfter: true)
+            }
+        } else {
+            do {
+                let fullText = try await executeBackend(
+                    systemPrompt: systemPrompt,
+                    messages: chatMessages,
+                    model: modelId,
+                    temperature: temperature,
+                    onDelta: nil
+                )
+                let response: [String: Any] = [
+                    "id": responseId,
+                    "object": "response",
+                    "created_at": createdAt,
+                    "status": "completed",
+                    "model": modelId,
+                    "output_text": fullText,
+                    "output": [[
+                        "id": messageId,
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [["type": "output_text", "text": fullText, "annotations": []]]
+                    ]],
+                    "usage": [
+                        "input_tokens": 0,
+                        "output_tokens": max(1, fullText.count / 4),
+                        "total_tokens": max(1, fullText.count / 4)
+                    ]
+                ]
+                sendJSONResponse(on: connection, statusCode: 200, statusText: "OK", object: response)
+            } catch {
+                sendJSONResponse(
+                    on: connection,
+                    statusCode: 500,
+                    statusText: "Internal Server Error",
+                    object: ["error": ["message": error.localizedDescription, "type": "server_error"]]
+                )
+            }
+        }
+    }
+
+    // MARK: - OpenAI Legacy Completions (/v1/completions)
+
+    private func handleOpenAILegacyCompletions(_ request: HTTPRequest, on connection: NWConnection) async {
+        guard let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["message": "Invalid JSON body.", "type": "invalid_request_error"]]
+            )
+            return
+        }
+
+        let prompt: String
+        if let p = json["prompt"] as? String {
+            prompt = p
+        } else if let arr = json["prompt"] as? [String] {
+            prompt = arr.joined(separator: "\n")
+        } else {
+            prompt = ""
+        }
+
+        guard !prompt.isEmpty else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["message": "Field `prompt` must not be empty.", "type": "invalid_request_error"]]
+            )
+            return
+        }
+
+        let modelId = resolvedModelId(requested: json["model"] as? String)
+        let stream = (json["stream"] as? Bool) ?? false
+        let temperature = (json["temperature"] as? Double) ?? SettingsStore.shared.temperature
+        let completionId = "cmpl-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(20))"
+        let created = Int(Date().timeIntervalSince1970)
+        let chatMessages = [ChatMessage(role: .user, content: prompt)]
+
+        if stream {
+            sendStreamHeaders(on: connection, contentType: "text/event-stream; charset=utf-8")
+            do {
+                _ = try await executeBackend(systemPrompt: "", messages: chatMessages, model: modelId, temperature: temperature) { delta in
+                    self.sendSSEData(on: connection, object: [
+                        "id": completionId,
+                        "object": "text_completion",
+                        "created": created,
+                        "model": modelId,
+                        "choices": [["text": delta, "index": 0, "finish_reason": NSNull()]]
+                    ])
+                }
+                sendSSEData(on: connection, object: [
+                    "id": completionId,
+                    "object": "text_completion",
+                    "created": created,
+                    "model": modelId,
+                    "choices": [["text": "", "index": 0, "finish_reason": "stop"]]
+                ])
+                sendRawAndClose(on: connection, string: "data: [DONE]\n\n")
+            } catch {
+                sendSSEData(on: connection, object: ["error": ["message": error.localizedDescription]])
+                sendRawAndClose(on: connection, string: "data: [DONE]\n\n")
+            }
+        } else {
+            do {
+                let fullText = try await executeBackend(systemPrompt: "", messages: chatMessages, model: modelId, temperature: temperature, onDelta: nil)
+                sendJSONResponse(on: connection, statusCode: 200, statusText: "OK", object: [
+                    "id": completionId,
+                    "object": "text_completion",
+                    "created": created,
+                    "model": modelId,
+                    "choices": [["text": fullText, "index": 0, "finish_reason": "stop"]],
+                    "usage": ["prompt_tokens": 0, "completion_tokens": max(1, fullText.count / 4), "total_tokens": max(1, fullText.count / 4)]
+                ])
+            } catch {
+                sendJSONResponse(on: connection, statusCode: 500, statusText: "Internal Server Error", object: ["error": ["message": error.localizedDescription]])
+            }
+        }
+    }
+
+    // MARK: - llama.cpp Native Completion (/completion)
+
+    private func handleLlamaCppCompletion(_ request: HTTPRequest, on connection: NWConnection) async {
+        guard let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+              let prompt = json["prompt"] as? String, !prompt.isEmpty else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["message": "Field `prompt` must be a non-empty string.", "type": "invalid_request_error"]]
+            )
+            return
+        }
+
+        let modelId = resolvedModelId(requested: json["model"] as? String)
+        let stream = (json["stream"] as? Bool) ?? false
+        let temperature = (json["temperature"] as? Double) ?? SettingsStore.shared.temperature
+        let chatMessages = [ChatMessage(role: .user, content: prompt)]
+
+        if stream {
+            sendStreamHeaders(on: connection, contentType: "text/event-stream; charset=utf-8")
+            do {
+                _ = try await executeBackend(systemPrompt: "", messages: chatMessages, model: modelId, temperature: temperature) { delta in
+                    self.sendSSEData(on: connection, object: ["content": delta, "stop": false, "model": modelId])
+                }
+                sendSSEData(on: connection, object: ["content": "", "stop": true, "model": modelId])
+                sendRawAndClose(on: connection, string: "")
+            } catch {
+                sendSSEData(on: connection, object: ["content": "", "stop": true, "error": error.localizedDescription])
+                sendRawAndClose(on: connection, string: "")
+            }
+        } else {
+            do {
+                let fullText = try await executeBackend(systemPrompt: "", messages: chatMessages, model: modelId, temperature: temperature, onDelta: nil)
+                sendJSONResponse(on: connection, statusCode: 200, statusText: "OK", object: [
+                    "content": fullText,
+                    "stop": true,
+                    "stopped_eos": true,
+                    "model": modelId
+                ])
+            } catch {
+                sendJSONResponse(on: connection, statusCode: 500, statusText: "Internal Server Error", object: ["error": ["message": error.localizedDescription]])
+            }
+        }
+    }
+
+    // MARK: - Google Gemini REST API (/v1beta/models/{model}:generateContent)
+
+    private func handleGeminiGenerateContent(_ request: HTTPRequest, modelInPath: String, stream: Bool, on connection: NWConnection) async {
+        guard let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["code": 400, "message": "Invalid JSON body.", "status": "INVALID_ARGUMENT"]]
+            )
+            return
+        }
+
+        var systemPrompt = ""
+        if let sysObj = (json["systemInstruction"] as? [String: Any]) ?? (json["system_instruction"] as? [String: Any]),
+           let parts = sysObj["parts"] as? [[String: Any]] {
+            systemPrompt = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        }
+
+        var chatMessages: [ChatMessage] = []
+        if let contents = json["contents"] as? [[String: Any]] {
+            for item in contents {
+                let roleStr = ((item["role"] as? String) ?? "user").lowercased()
+                let parts = (item["parts"] as? [[String: Any]]) ?? []
+                let text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                if !text.isEmpty {
+                    chatMessages.append(ChatMessage(role: roleStr == "model" ? .assistant : .user, content: text))
+                }
+            }
+        }
+
+        guard !chatMessages.isEmpty else {
+            sendJSONResponse(
+                on: connection,
+                statusCode: 400,
+                statusText: "Bad Request",
+                object: ["error": ["code": 400, "message": "Field `contents` must contain at least one message.", "status": "INVALID_ARGUMENT"]]
+            )
+            return
+        }
+
+        let modelId = resolvedModelId(requested: modelInPath)
+        let genConfig = json["generationConfig"] as? [String: Any]
+        let temperature = (genConfig?["temperature"] as? Double) ?? SettingsStore.shared.temperature
+
+        if stream {
+            sendStreamHeaders(on: connection, contentType: "text/event-stream; charset=utf-8")
+            do {
+                _ = try await executeBackend(systemPrompt: systemPrompt, messages: chatMessages, model: modelId, temperature: temperature) { delta in
+                    self.sendSSEData(on: connection, object: [
+                        "candidates": [[
+                            "content": ["role": "model", "parts": [["text": delta]]],
+                            "index": 0
+                        ]],
+                        "modelVersion": modelId
+                    ])
+                }
+                sendSSEData(on: connection, object: [
+                    "candidates": [[
+                        "content": ["role": "model", "parts": [["text": ""]]],
+                        "finishReason": "STOP",
+                        "index": 0
+                    ]],
+                    "modelVersion": modelId
+                ])
+                sendRawAndClose(on: connection, string: "")
+            } catch {
+                sendSSEData(on: connection, object: ["error": ["code": 500, "message": error.localizedDescription, "status": "INTERNAL"]])
+                sendRawAndClose(on: connection, string: "")
+            }
+        } else {
+            do {
+                let fullText = try await executeBackend(systemPrompt: systemPrompt, messages: chatMessages, model: modelId, temperature: temperature, onDelta: nil)
+                sendJSONResponse(on: connection, statusCode: 200, statusText: "OK", object: [
+                    "candidates": [[
+                        "content": ["role": "model", "parts": [["text": fullText]]],
+                        "finishReason": "STOP",
+                        "index": 0
+                    ]],
+                    "modelVersion": modelId
+                ])
+            } catch {
+                sendJSONResponse(
+                    on: connection,
+                    statusCode: 500,
+                    statusText: "Internal Server Error",
+                    object: ["error": ["code": 500, "message": error.localizedDescription, "status": "INTERNAL"]]
                 )
             }
         }

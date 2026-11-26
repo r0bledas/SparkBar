@@ -9,6 +9,9 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
     case groq = "groq"
     case gemini = "gemini"
     case ollama = "ollama"
+    case llamacpp = "llamacpp"
+    case lmstudio = "lmstudio"
+    case mlx = "mlx"
     case custom = "custom"
 
     public var id: String { rawValue }
@@ -23,6 +26,9 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
         case .groq: return "Groq"
         case .gemini: return "Google Gemini"
         case .ollama: return "Ollama (Local)"
+        case .llamacpp: return "llama.cpp (Local)"
+        case .lmstudio: return "LM Studio (Local)"
+        case .mlx: return "MLX Server (Local)"
         case .custom: return "Custom OpenAI-Compatible"
         }
     }
@@ -37,14 +43,19 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
         case .groq: return "https://api.groq.com/openai/v1"
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .ollama: return "http://127.0.0.1:11434/v1"
+        case .llamacpp: return "http://127.0.0.1:8080/v1"
+        case .lmstudio: return "http://127.0.0.1:1234/v1"
+        case .mlx: return "http://127.0.0.1:8080/v1"
         case .custom: return "http://127.0.0.1:8080/v1"
         }
     }
 
     public var requiresAPIKey: Bool {
         switch self {
-        case .antigravity, .ollama: return false
-        default: return true
+        case .antigravity, .ollama, .llamacpp, .lmstudio, .mlx, .custom:
+            return false
+        default:
+            return true
         }
     }
 
@@ -59,7 +70,7 @@ public enum LLMProviderType: String, CaseIterable, Codable, Identifiable {
 
     public static let antigravityProviders: [LLMProviderType] = [.antigravity]
     public static let apiProviders: [LLMProviderType] = [.deepseek, .openai, .openrouter, .anthropic, .groq, .gemini]
-    public static let localProviders: [LLMProviderType] = [.ollama, .custom]
+    public static let localProviders: [LLMProviderType] = [.ollama, .llamacpp, .lmstudio, .mlx, .custom]
 }
 
 /// Dynamic model metadata fetched live from `GET /models` or `agy models` — zero hardcoded model lists.

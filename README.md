@@ -45,8 +45,9 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
 
 ## ✨ Features
 
-* **Local API Endpoint (`Beta`, `v1.7.0`):**
-  * Optional built-in loopback HTTP server (`127.0.0.1:11435` by default, configurable in Settings) exposing **OpenAI** (`/v1/models`, `/v1/chat/completions`), **Anthropic** (`/v1/messages`), and **Ollama** (`/api/tags`, `/api/chat`, `/api/generate`) endpoints—both streaming and non-streaming—backed by SparkBar's active LLM provider.
+* **Local API Endpoint (`Beta`, `v1.8.0`):**
+  * Optional built-in loopback HTTP server (`127.0.0.1:11435` by default, configurable in Settings) exposing **OpenAI** (`/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/completions`), **Anthropic** (`/v1/messages`), **Ollama** (`/api/tags`, `/api/chat`, `/api/generate`), **Google Gemini** (`/v1beta/models`, `:generateContent`, `:streamGenerateContent`), and **llama.cpp** (`/completion`) endpoints—both streaming and non-streaming—backed by SparkBar's active LLM provider.
+* **Local LLM Runner Presets:** Built-in zero-API-key presets for **Ollama**, **llama.cpp (`llama-server`)**, **LM Studio**, **MLX Server**, and **Custom OpenAI-Compatible** endpoints.
 * **Google Antigravity (AGY CLI) Zero-API-Key Provider (`v1.5.0`):**
   * Use your **Google One / Antigravity** plan directly inside SparkBar with **zero metered API keys**.
   * Spawns `agy -p ... --output-format stream-json` on-demand per turn and exits cleanly when finished — keeping **0 MB idle RAM** overhead while streaming live responses, tools, and persistent multi-turn conversations (`--conversation <id>`).

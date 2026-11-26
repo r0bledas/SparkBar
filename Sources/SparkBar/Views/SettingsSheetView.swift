@@ -236,11 +236,13 @@ public struct SettingsSheetView: View {
                         )
                     }
 
-                    // API Key Field
-                    if settings.selectedProvider.requiresAPIKey {
+                    // API Key Field (required for cloud APIs, optional for Custom OpenAI-Compatible)
+                    if settings.selectedProvider.requiresAPIKey || settings.selectedProvider == .custom {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("\(settings.selectedProvider.displayName) API Key")
+                                Text(settings.selectedProvider == .custom
+                                     ? "\(settings.selectedProvider.displayName) API Key (Optional)"
+                                     : "\(settings.selectedProvider.displayName) API Key")
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
@@ -352,7 +354,7 @@ public struct SettingsSheetView: View {
                             }
                         }
 
-                        Toggle("Expose OpenAI, Anthropic & Ollama endpoints on 127.0.0.1", isOn: $settings.enableLocalAPIServer)
+                        Toggle("Expose OpenAI, Anthropic, Ollama, Gemini & llama.cpp on 127.0.0.1", isOn: $settings.enableLocalAPIServer)
                             .font(.system(size: 13))
 
                         HStack(spacing: 8) {
@@ -386,6 +388,8 @@ public struct SettingsSheetView: View {
                                 endpointCopyRow(label: "OpenAI", url: "http://127.0.0.1:\(port)/v1")
                                 endpointCopyRow(label: "Anthropic", url: "http://127.0.0.1:\(port)")
                                 endpointCopyRow(label: "Ollama", url: "http://127.0.0.1:\(port)")
+                                endpointCopyRow(label: "Gemini", url: "http://127.0.0.1:\(port)/v1beta")
+                                endpointCopyRow(label: "llama.cpp", url: "http://127.0.0.1:\(port)/completion")
                             }
                             .padding(10)
                             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -579,7 +583,7 @@ public struct SettingsSheetView: View {
     }
 
     private func saveCurrentProviderFields() {
-        if settings.selectedProvider.requiresAPIKey {
+        if settings.selectedProvider.requiresAPIKey || settings.selectedProvider == .custom {
             settings.setAPIKey(apiKeyInput, for: settings.selectedProvider)
         }
         if settings.selectedProvider != .antigravity {
