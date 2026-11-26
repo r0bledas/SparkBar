@@ -6,6 +6,17 @@ import AppKit
 public enum SparkBarIconRenderer {
     public static func makeImage(size: CGFloat = 18, isTemplate: Bool = true) -> NSImage {
         let imageSize = NSSize(width: size, height: size)
+        if let url = Bundle.main.url(forResource: "SparkBarSymbol", withExtension: "png"),
+           let source = NSImage(contentsOf: url) {
+            let rendered = NSImage(size: imageSize, flipped: false) { rect in
+                NSGraphicsContext.current?.imageInterpolation = .high
+                source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
+                return true
+            }
+            rendered.isTemplate = isTemplate
+            return rendered
+        }
+
         let image = NSImage(size: imageSize, flipped: false) { rect in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
             drawSymbol(in: ctx, size: rect.size, capsuleAlpha: isTemplate ? 0.72 : 0.75, boltAlpha: 1.0)

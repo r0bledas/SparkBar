@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="SparkBar"
-VERSION="${1:-1.8.6}"
+VERSION="${1:-1.8.7}"
 GIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 BUNDLE_DIR="dist/${APP_NAME}.app"
 CONTENTS_DIR="${BUNDLE_DIR}/Contents"
@@ -21,6 +21,9 @@ cp "AGENTS.md" "${RESOURCES_DIR}/AGENTS.md"
 
 if [ -f "Assets/AppIcon.icns" ]; then
     cp "Assets/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+fi
+if [ -f "Assets/SparkBarSymbol.png" ]; then
+    cp "Assets/SparkBarSymbol.png" "${RESOURCES_DIR}/SparkBarSymbol.png"
 fi
 if [ -f "Assets/SparkBarSymbol.pdf" ]; then
     cp "Assets/SparkBarSymbol.pdf" "${RESOURCES_DIR}/SparkBarSymbol.pdf"
