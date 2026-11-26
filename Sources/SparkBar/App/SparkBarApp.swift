@@ -66,12 +66,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        // Single-instance guard: if another SparkBar process is already running, terminate this duplicate immediately.
+        // Single-instance guard: if another SparkBar process is already running, ask it to open & focus the main window and exit.
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let bundleId = Bundle.main.bundleIdentifier ?? "com.sparkbar.app"
         let duplicates = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
             .filter { $0.processIdentifier != currentPID }
         if !duplicates.isEmpty {
+            DistributedNotificationCenter.default().post(
+                name: NSNotification.Name("com.sparkbar.openMainWindow"),
+                object: nil
+            )
             NSApp.terminate(nil)
             return
         }
@@ -97,6 +101,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleExternalOpenMainWindow),
+            name: NSNotification.Name("com.sparkbar.openMainWindow"),
+            object: nil
+        )
+
         PanelController.shared.setupPanel(with: FloatingPromptView())
 
         HotkeyManager.shared.onToggle = {
@@ -109,9 +120,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // If launched automatically at login/restart, stay silent in the background until ⌥Space is pressed.
-        // If launched manually by the user, show the floating bar right away.
+        // If launched manually by the user (e.g. from /Applications), open and focus the main full-size window.
         if !wasLaunchedAtStartup(notification) {
-            PanelController.shared.showPanel()
+            FullScreenChatWindowController.shared.showWindow()
             // On manual launch, if AGY is selected but binary or Google login isn't set up yet, open Settings to guide setup
             if SettingsStore.shared.selectedProvider == .antigravity {
                 AGYAccountManager.shared.reload()
@@ -123,8 +134,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        PanelController.shared.showPanel()
+        FullScreenChatWindowController.shared.showWindow()
         return true
+    }
+
+    @objc private func handleExternalOpenMainWindow() {
+        Task { @MainActor in
+            FullScreenChatWindowController.shared.showWindow()
+        }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {

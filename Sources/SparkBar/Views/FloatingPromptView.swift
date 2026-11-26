@@ -16,6 +16,7 @@ public struct FloatingPromptView: View {
     @State private var scrollToBottomTrigger: Int = 0
     @State private var scrollWheelMonitor: Any? = nil
     @State private var mouseHoverMonitor: Any? = nil
+    @State private var globalMouseHoverMonitor: Any? = nil
     @State private var isHoveringTopQuarter: Bool = false
     @State private var historySearchText: String = ""
     @State private var isDropTargeted: Bool = false
@@ -30,25 +31,42 @@ public struct FloatingPromptView: View {
         VStack(spacing: 0) {
             // 1. Top Conversation / History Area (Only appears when messages exist or History is toggled — collapsed bar stays minimal)
             if hasActiveChatArea {
-                // Dedicated top window drag bar (outside the ScrollView, identical to bottomControlBar's drag handle)
-                WindowDragHandle()
-                    .frame(maxWidth: .infinity, minHeight: 20, maxHeight: 20)
-                    .overlay(
-                        Capsule()
-                            .fill(Color.primary.opacity(0.22))
-                            .frame(width: 38, height: 4.5)
-                            .allowsHitTesting(false)
+                ZStack(alignment: .top) {
+                    Group {
+                        if viewModel.showHistory {
+                            historyBrowserArea
+                        } else {
+                            conversationArea
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .clear, location: 0.02),
+                                .init(color: .black, location: 0.11),
+                                .init(color: .black, location: 0.97),
+                                .init(color: .clear, location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                     )
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                if viewModel.showHistory {
-                    historyBrowserArea
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    conversationArea
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Translucent top drag handle overlaid on the faded chat edge (no hard straight cut)
+                    WindowDragHandle()
+                        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28)
+                        .overlay(alignment: .top) {
+                            Capsule()
+                                .fill(Color.primary.opacity(0.24))
+                                .frame(width: 38, height: 4.5)
+                                .padding(.top, 8)
+                                .allowsHitTesting(false)
+                        }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Divider()
                     .opacity(0.45)
@@ -212,6 +230,10 @@ public struct FloatingPromptView: View {
                 NSEvent.removeMonitor(hoverMon)
                 mouseHoverMonitor = nil
             }
+            if let globalHoverMon = globalMouseHoverMonitor {
+                NSEvent.removeMonitor(globalHoverMon)
+                globalMouseHoverMonitor = nil
+            }
         }
         .onChange(of: hasActiveChatArea) { _, active in
             if !active {
@@ -242,24 +264,35 @@ public struct FloatingPromptView: View {
     }
 
     private func setupTopQuarterHoverMonitor() {
-        guard mouseHoverMonitor == nil else { return }
-        mouseHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited]) { event in
-            guard let win = event.window, win is FloatingPanel else {
-                if isHoveringTopQuarter { isHoveringTopQuarter = false }
+        if mouseHoverMonitor == nil {
+            mouseHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .mouseEntered, .mouseExited, .leftMouseDragged]) { event in
+                evaluateTopQuarterHover()
                 return event
             }
-            let h = win.frame.height
-            let w = win.frame.width
-            let loc = event.locationInWindow
-            let inTopQuarter = (event.type != .mouseExited)
-                && loc.x >= 0 && loc.x <= w
-                && loc.y >= h * 0.75 && loc.y <= h
-            if isHoveringTopQuarter != inTopQuarter {
-                withAnimation(.easeInOut(duration: 0.14)) {
-                    isHoveringTopQuarter = inTopQuarter
+        }
+        if globalMouseHoverMonitor == nil {
+            globalMouseHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { _ in
+                Task { @MainActor in
+                    evaluateTopQuarterHover()
                 }
             }
-            return event
+        }
+    }
+
+    private func evaluateTopQuarterHover() {
+        guard hasActiveChatArea, let frame = PanelController.shared.currentPanelFrame else {
+            if isHoveringTopQuarter {
+                isHoveringTopQuarter = false
+            }
+            return
+        }
+        let loc = NSEvent.mouseLocation
+        let inTopQuarter = frame.minX <= loc.x && loc.x <= frame.maxX
+            && (frame.maxY - frame.height * 0.25) <= loc.y && loc.y <= frame.maxY
+        if isHoveringTopQuarter != inTopQuarter {
+            withAnimation(.easeInOut(duration: 0.14)) {
+                isHoveringTopQuarter = inTopQuarter
+            }
         }
     }
 
@@ -428,7 +461,7 @@ public struct FloatingPromptView: View {
                             }
                     }
                     .padding(.horizontal, 18)
-                    .padding(.top, 6)
+                    .padding(.top, 28)
                     .padding(.bottom, 14)
                 }
 

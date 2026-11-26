@@ -37,6 +37,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
 
         ChatViewModel.shared.showSettings = true
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
@@ -49,6 +53,11 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     public func windowWillClose(_ notification: Notification) {
         ChatViewModel.shared.showSettings = false
+        DispatchQueue.main.async {
+            if !self.isVisible && !FullScreenChatWindowController.shared.isVisible {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 }
 

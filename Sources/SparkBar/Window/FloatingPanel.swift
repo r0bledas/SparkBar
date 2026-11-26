@@ -232,6 +232,12 @@ public final class PanelController: NSObject, NSWindowDelegate {
     private var panel: FloatingPanel?
     public let focusTrigger = PassthroughSubject<Void, Never>()
 
+    /// Current screen-space frame of the floating panel when visible (used for reliable global cursor hover checks).
+    public var currentPanelFrame: NSRect? {
+        guard let panel = panel, panel.isVisible else { return nil }
+        return panel.frame
+    }
+
     /// Fixed bottom-left anchor point on the screen so the panel ALWAYS grows strictly from bottom-to-top
     /// without ever jumping up or down when sending a message or starting a new chat.
     private var anchoredBottomOrigin: NSPoint?

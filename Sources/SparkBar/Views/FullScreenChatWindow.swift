@@ -52,9 +52,19 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
         PanelController.shared.hidePanel()
         ChatViewModel.shared.showHistory = false
 
+        // Promote to a regular foreground app while the main window is open so macOS gives it full focus & menu bar ownership
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        DispatchQueue.main.async { [weak self] in
+            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            NSApp.activate(ignoringOtherApps: true)
+            self?.window?.makeKeyAndOrderFront(nil)
+        }
 
         if let lastUserMsgId = ChatViewModel.shared.messages.last(where: { $0.role == .user })?.id {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
@@ -73,6 +83,12 @@ public final class FullScreenChatWindowController: NSObject, NSWindowDelegate {
 
     public func windowWillClose(_ notification: Notification) {
         ChatViewModel.shared.persistCurrentSession()
+        // Return to featherweight accessory mode once main windows are closed so ⌥Space stays unobtrusive
+        DispatchQueue.main.async {
+            if !self.isVisible && !SettingsWindowController.shared.isVisible {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 }
 
