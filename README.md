@@ -45,49 +45,73 @@ So I built **SparkBar**: pure native Swift, SwiftUI, and AppKit `NSPanel`. Zero 
 
 ## ✨ Features
 
-* **Local API Endpoint (`Beta`, `v1.8.0`):**
-  * Optional built-in loopback HTTP server (`127.0.0.1:11435` by default, configurable in Settings) exposing **OpenAI** (`/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/completions`), **Anthropic** (`/v1/messages`), **Ollama** (`/api/tags`, `/api/chat`, `/api/generate`), **Google Gemini** (`/v1beta/models`, `:generateContent`, `:streamGenerateContent`), and **llama.cpp** (`/completion`) endpoints—both streaming and non-streaming—backed by SparkBar's active LLM provider.
-* **Local LLM Runner Presets:** Built-in zero-API-key presets for **Ollama**, **llama.cpp (`llama-server`)**, **LM Studio**, **MLX Server**, and **Custom OpenAI-Compatible** endpoints.
-* **Google Antigravity (AGY CLI) Zero-API-Key Provider (`v1.5.0`):**
+* **Standalone Full-Screen / Resizable Chat Window (`⌘ + ⇧ + F`):**
+  * Expand any conversation into a dedicated, resizable native macOS window with an integrated **History** sidebar and standard macOS titlebar double-click zoom (`performZoom`).
+  * The floating Spotlight bar stays minimal and fixed-size (`520×105` collapsed, `520×520` expanded) with subtle circular corner **Maximize** and **Hide** controls that appear only when hovering over the top quarter.
+* **Google Antigravity (AGY CLI) Zero-API-Key Provider:**
   * Use your **Google One / Antigravity** plan directly inside SparkBar with **zero metered API keys**.
   * Spawns `agy -p ... --output-format stream-json` on-demand per turn and exits cleanly when finished — keeping **0 MB idle RAM** overhead while streaming live responses, tools, and persistent multi-turn conversations (`--conversation <id>`).
-  * Includes 1-click official `agy` binary download in Settings and optional [`AGY-Portable`](https://github.com/r0bledas/AGY-Portable) USB folder isolation.
-* **Standalone Native macOS Settings Window (`⌘ + ,`):**
-  * Opens as a real, independent macOS `NSWindow` (`[.titled, .closable, .miniaturizable, .resizable]`) with standard window controls—completely decoupled from the floating prompt panel.
-* **1-Click Self-Update from GitHub:**
-  * Sync directly from `r0bledas/SparkBar` on GitHub with a single click in Settings or the menu bar (`Update from GitHub…`). Automatically pulls the latest `main` commit, builds a release bundle, installs to `/Applications/SparkBar.app`, and relaunches.
+  * Includes 1-click official `agy` binary download & update checks, multi-account Google email switching, automatic variant/effort grouping from `agy models`, and optional [`AGY-Portable`](https://github.com/r0bledas/AGY-Portable) USB folder isolation.
+* **Grouped Multi-Provider Support (Zero Hardcoded Models):**
+  * **Google Antigravity:** `Google Antigravity (AGY)`
+  * **Cloud APIs:** `DeepSeek`, `OpenAI`, `OpenRouter`, `Anthropic Claude`, `Groq`, `Google Gemini`
+  * **Local Runners (No API Key Required):** `Ollama`, `llama.cpp`, `LM Studio`, `MLX Server`, and `Custom OpenAI-Compatible` (optional API key)
+  * Dynamically discovers models and Thinking Effort / variant levels (`Low`, `Medium`, `High`, `XHigh`, `Max`) directly from each provider.
+* **Local API Endpoint (`Beta`):**
+  * Optional built-in loopback HTTP/1.1 server (`127.0.0.1:11435` by default, zero external dependencies via `Network.framework`) exposing **OpenAI**, **OpenAI Responses**, **Anthropic**, **Ollama**, **Google Gemini REST**, and **llama.cpp** endpoints backed by SparkBar's active provider.
+* **Standalone Native macOS Settings Window (`⌘ + ,`) & 1-Click GitHub Self-Update:**
+  * Opens as an independent macOS `NSWindow` decoupled from the floating prompt bar.
+  * Sync directly from `r0bledas/SparkBar` with a single click (`Update from GitHub…`) to pull `main`, build a Release `.app`, install to `/Applications/SparkBar.app`, and relaunch.
 * **Smooth Window Dragging & Magnetic Snapping:**
-  * Move the panel anytime using the top drag bar or bottom control bar. Features magnetic snapping to your screen's optimal bottom anchor and `⌘`-locked horizontal/vertical axis alignment with native trackpad haptic alignment ticks.
+  * Drag the floating panel freely with magnetic bottom-anchor snapping, `⌘`-locked axis alignment, and native trackpad haptic alignment ticks.
 * **Image Attachments & Instant Speech-Bubble Previews:**
-  * Drag & drop images, screenshots, or paste from clipboard (`⌘ + V`). Hovering over any image thumbnail instantly displays a speech-bubble popover with the file name on the top layer without layout shifts.
-* **Multi-Line Wrapping Input Bar:**
-  * Wraps lengthy prompts cleanly across lines with top/bottom edge gradient fading, keeping the input height compact and the cursor always visible.
-* **Featherweight Native Architecture:** Pure Swift & AppKit `NSPanel` with `.nonactivatingPanel`, `NSVisualEffectView` HUD blur, and magnetic axis snapping with trackpad haptic alignment—zero Chromium/Electron bloat.
-* **Instant Global Hotkey (`⌥ + Space`):** Registered via native macOS Carbon Event Manager (`RegisterEventHotKey`). Press `Option + Space` to summon or dismiss from any space or full-screen app.
-* **Zero-Discovery Host Environment Manifest:** Automatically captures your login shell `PATH` (`/bin/zsh -lc`, Homebrew, Node, Rust/Cargo, Python) once at startup and injects a pre-probed environment manifest into the system prompt so the agent never wastes turns guessing installed tools.
-* **Autonomous Tool Engine:**
-  * `run_command` — Stateful login-shell execution (`cd` persists across turns) with a 30s synchronous window and automatic promotion to tracked background jobs.
-  * `job_status` / `job_cancel` — Monitor live stdout/stderr, PID, and exit codes of background builds or long-running scripts.
-  * `render_pdf` & `pdf_info` — Native 1-call HTML/Markdown to PDF generation (`WKWebView.createPDF`) and reliable page count/metadata verification via macOS `PDFKit`.
-  * `web_search` & `fetch_url` — Live web search via native offscreen WebKit rendering and clean readable text extraction.
-  * `read_file` / `write_file` / `list_directory` — Fast local filesystem inspection and editing.
-  * `clipboard` — Read from or write directly to the macOS system pasteboard (`NSPasteboard`).
-* **Persistent Conversation History & Markdown Logs (`⌘ + Y`):**
-  * Every conversation, reasoning chain, and tool execution is automatically persisted in `~/Library/Application Support/SparkBar/conversations/` and exported as clean human-readable `.md` logs in `~/Library/Application Support/SparkBar/logs/`.
-  * Browse, search, and resume any past conversation directly inside SparkBar via `⌘ + Y` or the History button.
-* **Dynamic API Model Discovery (`GET /v1/models`):**
-  * Automatically fetches live models and supported Thinking Effort levels (`None`, `Default`, `Low`, `High`, `Max`) from **DeepSeek**, **OpenAI**, **OpenRouter**, **Anthropic Claude**, **Groq**, **Google Gemini**, and **Local Ollama / LM Studio**.
-* **Model Changing & Model Awareness:**
-  * Switching models mid-conversation automatically inserts an inline end-to-end divider (`——— Switched to: <Model> ———`) in the chat stream and attaches a context note to your next prompt so the new model is aware of the handoff.
-* **Rich Markdown, Tables & Native LaTeX Rendering:**
-  * Supports GitHub-flavored Markdown tables, ASCII box-drawing tables, syntax-styled code blocks, and native KaTeX math blocks (`$$...$$` and `$...$`).
+  * Drag & drop images, screenshots, or paste from clipboard (`⌘ + V`). Hovering any thumbnail displays a top-layer speech-bubble filename popover without layout shift.
+* **Autonomous Tool Engine & Live Status Badges:**
+  * Clean live indicators (`Searching…` → `Searched: <query>`, `Viewed: <url>`, `Running command…`) with native icons.
+  * `web_search` & `fetch_url` — Live web search and readable page extraction.
+  * `run_command`, `job_status`, `job_cancel` — Stateful login-shell execution (`cd` persists across turns) with background job tracking.
+  * `render_pdf` & `pdf_info` — 1-call HTML/Markdown to PDF generation (`WKWebView.createPDF`) and `PDFKit` verification.
+  * `read_file` / `write_file` / `list_directory` & `clipboard` — Fast local file and macOS pasteboard access.
+  * **Zero-Discovery Host Environment Manifest:** Captures login shell `PATH` (`/bin/zsh -lc`, Homebrew, Node, Rust, Python) once at startup.
+* **Persistent History & Markdown Logs (`⌘ + Y`):**
+  * Automatically saves every thread in `~/Library/Application Support/SparkBar/conversations/` and exports clean `.md` logs in `~/Library/Application Support/SparkBar/logs/`.
+* **Smooth Memoized Markdown, Clickable Links, Tables & LaTeX:**
+  * Cached block rendering for stutter-free scrolling, underlined clickable hyperlinks (pointing-hand cursor + auto-hide floating panel on click), GitHub/ASCII tables, code blocks, and KaTeX math (`$$...$$` and `$...$`).
+
+---
+
+## 🔌 Local API Endpoint (Beta)
+
+Enable **Settings (`⌘ + ,`) → Local API Endpoint `BETA`** to expose SparkBar's active LLM backend on `http://127.0.0.1:11435` (loopback-only, configurable port, streaming & non-streaming):
+
+| Protocol | Base URL / Path | Supported Endpoints |
+| :--- | :--- | :--- |
+| **OpenAI** | `http://127.0.0.1:11435/v1` | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`, `POST /v1/completions` |
+| **Anthropic** | `http://127.0.0.1:11435` | `POST /v1/messages` |
+| **Ollama** | `http://127.0.0.1:11435` | `GET /api/tags`, `GET /api/version`, `POST /api/show`, `POST /api/chat`, `POST /api/generate` |
+| **Google Gemini** | `http://127.0.0.1:11435/v1beta` | `GET /v1beta/models`, `POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent` |
+| **llama.cpp** | `http://127.0.0.1:11435/completion` | `POST /completion` |
+| **Health** | `http://127.0.0.1:11435/health` | `GET /`, `GET /health` |
+
+Quick check with `curl`:
+
+```bash
+# OpenAI Chat Completions
+curl http://127.0.0.1:11435/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"default","messages":[{"role":"user","content":"Hello from SparkBar!"}]}'
+
+# Ollama Chat
+curl http://127.0.0.1:11435/api/chat \
+  -d '{"model":"default","stream":false,"messages":[{"role":"user","content":"Hello!"}]}'
+```
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Download Prebuilt macOS `.dmg`
-Grab the latest `SparkBar.dmg` from [**GitHub Releases**](https://github.com/r0bledas/SparkBar/releases/latest) and drag `SparkBar.app` into `/Applications`.
+### 1. Download Prebuilt macOS App
+Grab the latest `SparkBar-vX.Y.Z.zip` from [**GitHub Releases**](https://github.com/r0bledas/SparkBar/releases/latest), unzip it, and move `SparkBar.app` into `/Applications`.
 
 ### 2. Build & Run from Source (Swift Package Manager)
 
@@ -107,19 +131,20 @@ open /Applications/SparkBar.app
 | :--- | :--- |
 | **`⌥ + Space`** (`Option + Space`) | Summon or hide SparkBar from any app or full-screen space |
 | **`Return`** | Send prompt |
+| **`⌘ + ⇧ + F`** | Open standalone Full Window with integrated History sidebar |
 | **`Esc` / `⌘ + W`** | Dismiss floating panel (or close History view) |
 | **`⌘ + N` / `⌘ + K`** | Save current thread to log & start a New Chat |
-| **`⌘ + Y`** | Toggle Conversation History & Logs browser |
+| **`⌘ + Y`** | Toggle History browser |
 | **`⌘ + ,`** | Open Settings & API Keys |
 | **`⌘ + Q`** | Quit SparkBar |
 
 ---
 
-## 🔑 Configuring API Keys
+## 🔑 Configuring Providers & API Keys
 
-You can configure your API keys in two ways:
-1. **In-App Settings (`⌘ + ,`):** Select your provider (DeepSeek, OpenAI, OpenRouter, Anthropic, Groq, Gemini, or Ollama) and paste your key. Keys are stored securely in the macOS Keychain.
-2. **Environment Variables:** SparkBar automatically detects `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, and `GEMINI_API_KEY`.
+1. **Zero-API-Key (Google Antigravity):** Select **Google Antigravity (AGY)** in Settings (`⌘ + ,`) and click **Download & Sign In**.
+2. **Local Runners (No API Key):** Select **Ollama**, **llama.cpp**, **LM Studio**, **MLX Server**, or **Custom OpenAI-Compatible** in Settings.
+3. **Cloud APIs:** Paste your API key in Settings (stored securely in macOS Keychain), or export `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, or `GEMINI_API_KEY`.
 
 ---
 
