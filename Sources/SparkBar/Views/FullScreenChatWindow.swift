@@ -656,55 +656,14 @@ public struct FullScreenChatView: View {
                 Divider().opacity(0.3)
             }
 
-            // Input Row
-            HStack(spacing: 12) {
-                WrappingPromptTextView(
-                    text: $viewModel.inputText,
-                    placeholder: "Ask anything or run a task… (⌥ + Space)",
-                    onSubmit: {
-                        viewModel.sendCurrentPrompt()
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: .black, location: 0.14),
-                            .init(color: .black, location: 0.86),
-                            .init(color: .clear, location: 1.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-
-                if viewModel.isStreaming {
-                    Button {
-                        viewModel.stopGeneration()
-                    } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .help("Stop generating")
-                } else {
-                    let canSend = !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedImages.isEmpty
-                    Button {
-                        viewModel.sendCurrentPrompt()
-                    } label: {
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.35))
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .disabled(!canSend)
-                    .help("Send prompt (Return)")
-                }
-            }
+            // Input Row (isolated so keystrokes never re-render chatStreamView or sidebarView)
+            IsolatedPromptComposerRow(
+                inputState: viewModel.inputState,
+                isStreaming: viewModel.isStreaming,
+                hasAttachments: !viewModel.attachedImages.isEmpty,
+                onSend: { viewModel.sendCurrentPrompt() },
+                onStop: { viewModel.stopGeneration() }
+            )
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .frame(height: 54)
@@ -937,8 +896,7 @@ public struct FullScreenChatView: View {
                     HStack(spacing: 8) {
                         Spacer(minLength: 80)
                         ForEach(message.attachedImages) { img in
-                            if let data = Data(base64Encoded: img.base64Data),
-                               let nsImg = NSImage(data: data) {
+                            if let nsImg = ThumbnailImageCache.shared.thumbnail(for: img, maxPixelSize: 360) {
                                 Image(nsImage: nsImg)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)

@@ -320,60 +320,13 @@ public struct FloatingPromptView: View {
     }
 
     private var promptInputBar: some View {
-        HStack(spacing: 12) {
-            WrappingPromptTextView(
-                text: $viewModel.inputText,
-                placeholder: "Ask anything or run a task… (⌥ + Space)",
-                onSubmit: {
-                    viewModel.sendCurrentPrompt()
-                }
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .mask(
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0.0),
-                        .init(color: .black, location: 0.14),
-                        .init(color: .black, location: 0.86),
-                        .init(color: .clear, location: 1.0)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .accessibilityLabel("Prompt Input")
-
-            if viewModel.isStreaming {
-                Button {
-                    viewModel.stopGeneration()
-                } label: {
-                    Image(systemName: "stop.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(.red)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .help("Stop generating")
-                .accessibilityLabel("Stop generating")
-            } else {
-                let canSend = !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.attachedImages.isEmpty
-                Button {
-                    viewModel.sendCurrentPrompt()
-                } label: {
-                    Image(systemName: "arrow.right.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(
-                            canSend ? Color.accentColor : Color.secondary.opacity(0.35)
-                        )
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .disabled(!canSend)
-                .help("Send prompt (Return)")
-                .accessibilityLabel("Send prompt")
-            }
-        }
+        IsolatedPromptComposerRow(
+            inputState: viewModel.inputState,
+            isStreaming: viewModel.isStreaming,
+            hasAttachments: !viewModel.attachedImages.isEmpty,
+            onSend: { viewModel.sendCurrentPrompt() },
+            onStop: { viewModel.stopGeneration() }
+        )
         .padding(.horizontal, 18)
         .padding(.vertical, 8)
     }
@@ -576,8 +529,7 @@ public struct FloatingPromptView: View {
                     HStack(spacing: 8) {
                         Spacer(minLength: 60)
                         ForEach(message.attachedImages) { img in
-                            if let data = Data(base64Encoded: img.base64Data),
-                               let nsImg = NSImage(data: data) {
+                            if let nsImg = ThumbnailImageCache.shared.thumbnail(for: img, maxPixelSize: 320) {
                                 Image(nsImage: nsImg)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
@@ -1459,8 +1411,7 @@ struct AttachedImageThumbnailView: View {
         ZStack(alignment: .topTrailing) {
             // Thumbnail Preview (44 x 44) — static appearance with zero darkening or border animation on hover
             Group {
-                if let data = Data(base64Encoded: image.base64Data),
-                   let nsImg = NSImage(data: data) {
+                if let nsImg = ThumbnailImageCache.shared.thumbnail(for: image, maxPixelSize: 120) {
                     Image(nsImage: nsImg)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -1546,6 +1497,67 @@ struct SpeechBubblePointerStroke: Shape {
         path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         return path
+    }
+}
+
+/// Isolated composer row that observes ONLY `PromptInputState` so typing never re-renders the chat stream.
+struct IsolatedPromptComposerRow: View {
+    @ObservedObject var inputState: PromptInputState
+    let isStreaming: Bool
+    let hasAttachments: Bool
+    let onSend: () -> Void
+    let onStop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            WrappingPromptTextView(
+                text: Binding(
+                    get: { inputState.text },
+                    set: { ChatViewModel.shared.inputText = $0 }
+                ),
+                placeholder: "Ask anything or run a task… (⌥ + Space)",
+                onSubmit: onSend
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: .black, location: 0.14),
+                        .init(color: .black, location: 0.86),
+                        .init(color: .clear, location: 1.0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .accessibilityLabel("Prompt Input")
+
+            if isStreaming {
+                Button(action: onStop) {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.red)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Stop generating")
+                .accessibilityLabel("Stop generating")
+            } else {
+                let canSend = !inputState.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAttachments
+                Button(action: onSend) {
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary.opacity(0.35))
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .disabled(!canSend)
+                .help("Send prompt (Return)")
+                .accessibilityLabel("Send prompt")
+            }
+        }
     }
 }
 

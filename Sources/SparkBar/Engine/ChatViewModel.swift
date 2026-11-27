@@ -1,6 +1,56 @@
 import Foundation
 import Combine
 import AppKit
+import ImageIO
+
+/// Isolated observable holder for live prompt typing so keystrokes NEVER trigger `ChatViewModel.objectWillChange`
+/// or re-evaluate the chat message stream / sidebar views.
+@MainActor
+public final class PromptInputState: ObservableObject {
+    @Published public var text: String = ""
+    public init() {}
+}
+
+/// Hardware-accelerated downsampled thumbnail cache using ImageIO (`CGImageSourceCreateThumbnailAtIndex`).
+/// Prevents decoding full-resolution multi-megabyte base64 PNGs into 400+ MB of `Image IO` RAM on every SwiftUI body pass.
+public final class ThumbnailImageCache: @unchecked Sendable {
+    public static let shared = ThumbnailImageCache()
+    private let cache = NSCache<NSString, NSImage>()
+
+    private init() {
+        cache.countLimit = 80
+    }
+
+    public func thumbnail(for img: AttachedImage, maxPixelSize: Int) -> NSImage? {
+        let key = "\(img.id.uuidString)_\(maxPixelSize)" as NSString
+        if let hit = cache.object(forKey: key) {
+            return hit
+        }
+
+        // Prefer reading directly from localFilePath if present (avoids base64 decoding huge strings in RAM)
+        var source: CGImageSource?
+        if let localPath = img.localFilePath, FileManager.default.fileExists(atPath: localPath) {
+            source = CGImageSourceCreateWithURL(URL(fileURLWithPath: localPath) as CFURL, nil)
+        }
+        if source == nil, let data = Data(base64Encoded: img.base64Data) {
+            source = CGImageSourceCreateWithData(data as CFData, nil)
+        }
+        guard let cgSource = source else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(cgSource, 0, options as CFDictionary) else {
+            return nil
+        }
+        let nsImg = NSImage(cgImage: cgThumb, size: NSSize(width: cgThumb.width, height: cgThumb.height))
+        cache.setObject(nsImg, forKey: key)
+        return nsImg
+    }
+}
 
 @MainActor
 public final class ChatViewModel: ObservableObject {
@@ -9,8 +59,12 @@ public final class ChatViewModel: ObservableObject {
     @Published public var currentSessionId: UUID = UUID()
     @Published public var messages: [ChatMessage] = []
     @Published public var attachedImages: [AttachedImage] = []
-    @Published public var inputText: String = "" {
-        didSet {
+    public let inputState = PromptInputState()
+
+    public var inputText: String {
+        get { inputState.text }
+        set {
+            inputState.text = newValue
             guard !isSanitizingInput else { return }
             sanitizeDroppedImagePathsInInputText()
         }
@@ -115,11 +169,32 @@ public final class ChatViewModel: ObservableObject {
         let localPath = (ws as NSString).appendingPathComponent(name)
         try? data.write(to: URL(fileURLWithPath: localPath))
 
-        let b64 = data.base64EncodedString()
+        // Compact large screenshots (> 512 KB) to <= 1600px JPEG for base64 payload & session storage
+        // so sessions.json and RAM stay featherweight while localPath keeps the original full-res file.
+        var payloadData = data
+        var payloadMime = mimeType
+        if data.count > 512 * 1024,
+           let src = CGImageSourceCreateWithData(data as CFData, nil) {
+            let opts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 1600
+            ]
+            if let cgImg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) {
+                let rep = NSBitmapImageRep(cgImage: cgImg)
+                if let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.82]),
+                   jpeg.count < data.count {
+                    payloadData = jpeg
+                    payloadMime = "image/jpeg"
+                }
+            }
+        }
+
+        let b64 = payloadData.base64EncodedString()
         let item = AttachedImage(
             id: id,
             base64Data: b64,
-            mimeType: mimeType,
+            mimeType: payloadMime,
             fileName: name,
             localFilePath: localPath
         )
