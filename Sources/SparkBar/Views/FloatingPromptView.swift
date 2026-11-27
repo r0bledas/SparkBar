@@ -551,8 +551,13 @@ public struct FloatingPromptView: View {
                 }
 
                 if !message.content.isEmpty {
-                    HStack {
-                        Spacer(minLength: 60)
+                    HStack(alignment: .center, spacing: 6) {
+                        Spacer(minLength: 40)
+                        if !viewModel.isStreaming && message.id == viewModel.messages.last(where: { $0.role == .user })?.id {
+                            MessageActionIconButton(systemName: "pencil", helpText: "Edit prompt") {
+                                viewModel.editLastUserMessage()
+                            }
+                        }
                         Text(message.content)
                             .font(.system(size: 13.5, weight: .medium))
                             .foregroundStyle(.white)
@@ -626,8 +631,12 @@ public struct FloatingPromptView: View {
                         .frame(height: 1.5)
                         .padding(.vertical, 4)
 
-                    HStack(spacing: 12) {
-                        Button {
+                    HStack(spacing: 4) {
+                        MessageActionIconButton(
+                            systemName: copiedMessageId == message.id ? "checkmark" : "doc.on.doc",
+                            helpText: copiedMessageId == message.id ? "Copied" : "Copy answer",
+                            tint: copiedMessageId == message.id ? .green : nil
+                        ) {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(message.content, forType: .string)
                             copiedMessageId = message.id
@@ -636,46 +645,12 @@ public struct FloatingPromptView: View {
                                     copiedMessageId = nil
                                 }
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: copiedMessageId == message.id ? "checkmark" : "doc.on.doc")
-                                    .font(.system(size: 10))
-                                Text(copiedMessageId == message.id ? "Copied" : "Copy Answer")
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Copy assistant answer")
 
                         if !viewModel.isStreaming && message.id == viewModel.messages.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.id {
-                            Button {
+                            MessageActionIconButton(systemName: "arrow.clockwise", helpText: "Regenerate response") {
                                 viewModel.regenerateLastResponse()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 10))
-                                    Text("Regenerate")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
-                            .help("Regenerate response")
-
-                            Button {
-                                viewModel.editLastUserMessage()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 10))
-                                    Text("Edit Prompt")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Edit last prompt and resend")
                         }
                     }
                 } else if viewModel.isStreaming && message.id == viewModel.messages.last?.id && viewModel.activeToolStatus == nil {
@@ -1527,6 +1502,37 @@ struct SpeechBubblePointerStroke: Shape {
         path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         return path
+    }
+}
+
+/// Icon-only action button matching ClipShelf's compact pill padding & hover highlight.
+struct MessageActionIconButton: View {
+    let systemName: String
+    let helpText: String
+    var tint: Color? = nil
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(tint ?? (isHovered ? Color.primary : Color.secondary))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isHovered ? Color.primary.opacity(0.14) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(helpText)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 

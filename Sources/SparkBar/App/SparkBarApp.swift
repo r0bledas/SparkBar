@@ -180,7 +180,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenuItem.submenu = appMenu
         appMenu.addItem(withTitle: "New Chat", action: #selector(clearConversationAction), keyEquivalent: "n")
         appMenu.addItem(withTitle: "Open Full Window", action: #selector(openFullScreenWindowAction), keyEquivalent: "F")
-        appMenu.addItem(withTitle: "Copy Conversation as Markdown", action: #selector(copyConversationMarkdownAction), keyEquivalent: "C")
         appMenu.addItem(withTitle: "Conversation History…", action: #selector(toggleHistoryAction), keyEquivalent: "y")
         appMenu.addItem(withTitle: "Close Panel", action: #selector(closePanelAction), keyEquivalent: "w")
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
@@ -346,10 +345,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func clearConversationAction() {
         ChatViewModel.shared.startNewConversation()
         PanelController.shared.showPanel()
-    }
-
-    @objc private func copyConversationMarkdownAction() {
-        ChatViewModel.shared.copyCurrentConversationMarkdown()
     }
 
     @objc private func toggleHistoryAction() {

@@ -322,26 +322,6 @@ public final class ChatViewModel: ObservableObject {
         PanelController.shared.focusTrigger.send()
     }
 
-    /// Exports the active conversation as clean Markdown and copies it to the macOS pasteboard.
-    @discardableResult
-    public func copyCurrentConversationMarkdown() -> Bool {
-        guard !messages.isEmpty else { return false }
-        let tempSession = ConversationSession(
-            id: currentSessionId,
-            title: ConversationSession.makeTitle(from: messages),
-            createdAt: messages.first?.timestamp ?? Date(),
-            updatedAt: Date(),
-            provider: SettingsStore.shared.selectedProvider.rawValue,
-            model: SettingsStore.shared.effectiveModelIdForExecution,
-            agyConversationId: currentAGYConversationId,
-            messages: messages
-        )
-        let md = ConversationStore.shared.formatSessionMarkdown(tempSession)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(md, forType: .string)
-        return true
-    }
-
     /// Inserts or replaces an inline divider when the user switches models mid-conversation,
     /// queues a context note for the next turn, and defers live model mutation if currently streaming.
     public func handleModelSwitch(from oldModel: String, to newModel: String, newModelId: String) {

@@ -123,10 +123,6 @@ private final class FullScreenChatNSWindow: NSWindow {
                 SettingsWindowController.shared.showWindow()
                 return true
             }
-            if char == "c" && event.modifierFlags.contains(.shift) {
-                ChatViewModel.shared.copyCurrentConversationMarkdown()
-                return true
-            }
             if char == "v" {
                 if ChatViewModel.shared.checkAndAttachPasteboardImage() {
                     return true
@@ -156,7 +152,6 @@ public struct FullScreenChatView: View {
     @State private var renderedMessageLimit: Int = 30
     @State private var renamingSessionId: UUID? = nil
     @State private var renameDraftTitle: String = ""
-    @State private var showCopiedThreadToast: Bool = false
 
     public init() {}
 
@@ -365,13 +360,6 @@ public struct FullScreenChatView: View {
                                     renamingSessionId = session.id
                                 } label: {
                                     Label("Rename…", systemImage: "pencil")
-                                }
-                                Button {
-                                    let md = conversationStore.formatSessionMarkdown(session)
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(md, forType: .string)
-                                } label: {
-                                    Label("Copy as Markdown", systemImage: "doc.on.doc")
                                 }
                                 Divider()
                                 Button(role: .destructive) {
@@ -971,8 +959,13 @@ public struct FullScreenChatView: View {
                 }
 
                 if !message.content.isEmpty {
-                    HStack {
-                        Spacer(minLength: 80)
+                    HStack(alignment: .center, spacing: 6) {
+                        Spacer(minLength: 60)
+                        if !viewModel.isStreaming && message.id == viewModel.messages.last(where: { $0.role == .user })?.id {
+                            MessageActionIconButton(systemName: "pencil", helpText: "Edit prompt") {
+                                viewModel.editLastUserMessage()
+                            }
+                        }
                         Text(message.content)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.white)
@@ -1042,74 +1035,24 @@ public struct FullScreenChatView: View {
                         .frame(height: 1)
                         .padding(.vertical, 4)
 
-                    HStack(spacing: 12) {
-                        Button {
+                    HStack(spacing: 4) {
+                        MessageActionIconButton(
+                            systemName: copiedMessageId == message.id ? "checkmark" : "doc.on.doc",
+                            helpText: copiedMessageId == message.id ? "Copied" : "Copy answer",
+                            tint: copiedMessageId == message.id ? .green : nil
+                        ) {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(message.content, forType: .string)
                             copiedMessageId = message.id
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                                 if copiedMessageId == message.id { copiedMessageId = nil }
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: copiedMessageId == message.id ? "checkmark" : "doc.on.doc")
-                                    .font(.system(size: 10))
-                                Text(copiedMessageId == message.id ? "Copied" : "Copy Answer")
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
 
                         if !viewModel.isStreaming && message.id == viewModel.messages.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.id {
-                            Button {
+                            MessageActionIconButton(systemName: "arrow.clockwise", helpText: "Regenerate response") {
                                 viewModel.regenerateLastResponse()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 10))
-                                    Text("Regenerate")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
-                            .help("Regenerate response")
-
-                            Button {
-                                viewModel.editLastUserMessage()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 10))
-                                    Text("Edit Prompt")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Edit last prompt and resend")
-
-                            Spacer()
-
-                            Button {
-                                if viewModel.copyCurrentConversationMarkdown() {
-                                    showCopiedThreadToast = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                        showCopiedThreadToast = false
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: showCopiedThreadToast ? "checkmark" : "square.and.arrow.up")
-                                        .font(.system(size: 10))
-                                    Text(showCopiedThreadToast ? "Thread Copied" : "Copy Thread")
-                                        .font(.system(size: 11, weight: .medium))
-                                }
-                                .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Copy full conversation as Markdown (⌘⇧C)")
                         }
                     }
                 } else if viewModel.isStreaming && message.id == viewModel.messages.last?.id && viewModel.activeToolStatus == nil {
