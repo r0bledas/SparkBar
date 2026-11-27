@@ -154,12 +154,15 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func stopGeneration() {
+        let wasActive = isStreaming || currentTask != nil
         currentTask?.cancel()
         currentTask = nil
         AGYCLIRunner.shared.cancelCurrentProcess()
         isStreaming = false
         activeToolStatus = nil
-        persistCurrentSession()
+        if wasActive {
+            persistCurrentSession()
+        }
     }
 
     public func attachImage(data: Data, mimeType: String, fileName: String? = nil) {
@@ -272,8 +275,11 @@ public final class ChatViewModel: ObservableObject {
 
     /// Restores a saved conversation from `ConversationStore` so the user can review or continue it.
     public func loadSession(_ session: ConversationSession) {
+        let wasStreaming = isStreaming
         stopGeneration()
-        persistCurrentSession()
+        if !wasStreaming && !messages.isEmpty && currentSessionId != session.id {
+            persistCurrentSession()
+        }
         currentSessionId = session.id
         currentAGYConversationId = session.agyConversationId
         messages = session.messages
@@ -282,6 +288,58 @@ public final class ChatViewModel: ObservableObject {
         pendingModelSwitchNote = nil
         ConversationStore.shared.activeSessionId = session.id
         PanelController.shared.syncPanelHeight(hasMessages: !messages.isEmpty)
+    }
+
+    /// Re-runs the last user turn by trimming everything after the last user message and re-invoking the agent loop.
+    public func regenerateLastResponse() {
+        guard !isStreaming else { return }
+        guard let lastUserIdx = messages.lastIndex(where: { $0.role == .user }) else { return }
+        if lastUserIdx < messages.count - 1 {
+            messages.removeSubrange((lastUserIdx + 1)..<messages.count)
+        }
+        errorMessage = nil
+        isStreaming = true
+        activeToolStatus = nil
+        persistCurrentSession()
+        currentTask = Task { [weak self] in
+            guard let self = self else { return }
+            await self.runAgentLoop()
+        }
+    }
+
+    /// Moves the last user message back into the prompt box and removes that turn so the user can edit & resend it.
+    public func editLastUserMessage() {
+        guard !isStreaming else { return }
+        guard let lastUserIdx = messages.lastIndex(where: { $0.role == .user }) else { return }
+        let lastUser = messages[lastUserIdx]
+        messages.removeSubrange(lastUserIdx..<messages.count)
+        inputText = lastUser.content
+        if !lastUser.attachedImages.isEmpty {
+            attachedImages = lastUser.attachedImages
+        }
+        errorMessage = nil
+        persistCurrentSession()
+        PanelController.shared.focusTrigger.send()
+    }
+
+    /// Exports the active conversation as clean Markdown and copies it to the macOS pasteboard.
+    @discardableResult
+    public func copyCurrentConversationMarkdown() -> Bool {
+        guard !messages.isEmpty else { return false }
+        let tempSession = ConversationSession(
+            id: currentSessionId,
+            title: ConversationSession.makeTitle(from: messages),
+            createdAt: messages.first?.timestamp ?? Date(),
+            updatedAt: Date(),
+            provider: SettingsStore.shared.selectedProvider.rawValue,
+            model: SettingsStore.shared.effectiveModelIdForExecution,
+            agyConversationId: currentAGYConversationId,
+            messages: messages
+        )
+        let md = ConversationStore.shared.formatSessionMarkdown(tempSession)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(md, forType: .string)
+        return true
     }
 
     /// Inserts or replaces an inline divider when the user switches models mid-conversation,

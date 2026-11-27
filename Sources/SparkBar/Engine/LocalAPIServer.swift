@@ -215,6 +215,26 @@ public final class LocalAPIServer: ObservableObject {
             return
         }
 
+        // Optional Bearer / API Key authentication for Local API (Beta)
+        let configuredToken = SettingsStore.shared.localAPIServerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !configuredToken.isEmpty && path != "/" && path != "/health" {
+            let authHeader = request.headers["authorization"] ?? ""
+            let bearer = authHeader.lowercased().hasPrefix("bearer ")
+                ? String(authHeader.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                : ""
+            let xApiKey = (request.headers["x-api-key"] ?? "").trimmingCharacters(in: .whitespaces)
+            let xGoogKey = (request.headers["x-goog-api-key"] ?? "").trimmingCharacters(in: .whitespaces)
+            if bearer != configuredToken && xApiKey != configuredToken && xGoogKey != configuredToken {
+                sendJSONResponse(
+                    on: connection,
+                    statusCode: 401,
+                    statusText: "Unauthorized",
+                    object: ["error": ["message": "Invalid or missing Local API token.", "type": "authentication_error"]]
+                )
+                return
+            }
+        }
+
         switch (request.method, path) {
         case ("GET", "/"), ("GET", "/health"):
             let payload: [String: Any] = [
@@ -1210,7 +1230,8 @@ public final class LocalAPIServer: ObservableObject {
                 allowTools: false,
                 customBinaryPath: settings.agyCustomBinaryPath,
                 portableRoot: settings.agyPortableRootPath,
-                workingDirectory: nil
+                workingDirectory: nil,
+                isInteractive: false
             ) { event in
                 switch event {
                 case .textDelta(_, let delta):

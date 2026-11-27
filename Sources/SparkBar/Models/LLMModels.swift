@@ -204,6 +204,18 @@ public struct AttachedImage: Identifiable, Codable, Equatable {
         self.fileName = fileName
         self.localFilePath = localFilePath
     }
+
+    /// Returns Base64 payload, lazily reading from `localFilePath` when offloaded from `sessions.json`.
+    public func resolvedBase64Data() -> String {
+        if !base64Data.isEmpty {
+            return base64Data
+        }
+        if let path = localFilePath,
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+            return data.base64EncodedString()
+        }
+        return ""
+    }
 }
 
 public struct ChatMessage: Identifiable, Codable, Equatable {

@@ -275,8 +275,8 @@ public struct FloatingPromptView: View {
         }
         if globalMouseHoverMonitor == nil {
             globalMouseHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { _ in
+                guard PanelController.shared.isPanelVisibleAtomic else { return }
                 DispatchQueue.main.async {
-                    guard PanelController.shared.currentPanelFrame != nil else { return }
                     evaluateTopQuarterHover()
                 }
             }
@@ -647,6 +647,36 @@ public struct FloatingPromptView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Copy assistant answer")
+
+                        if !viewModel.isStreaming && message.id == viewModel.messages.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.id {
+                            Button {
+                                viewModel.regenerateLastResponse()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 10))
+                                    Text("Regenerate")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Regenerate response")
+
+                            Button {
+                                viewModel.editLastUserMessage()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 10))
+                                    Text("Edit Prompt")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit last prompt and resend")
+                        }
                     }
                 } else if viewModel.isStreaming && message.id == viewModel.messages.last?.id && viewModel.activeToolStatus == nil {
                     HStack(spacing: 6) {

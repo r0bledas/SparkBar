@@ -10,6 +10,13 @@ public enum AGYStreamEvent: Sendable {
     case finished(conversationId: String?, finalResponse: String?, status: String)
 }
 
+private final class AGYProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var proc: Process?
+    func set(_ p: Process) { lock.lock(); proc = p; lock.unlock() }
+    func get() -> Process? { lock.lock(); defer { lock.unlock() }; return proc }
+}
+
 /// On-demand, zero-idle-RAM runner for the Google Antigravity (`agy`) CLI.
 /// Spawns `agy -p ... --output-format stream-json` per turn, streams NDJSON events live,
 /// and exits cleanly when the turn finishes so idle RAM remains 0 MB.
@@ -17,7 +24,7 @@ public final class AGYCLIRunner: @unchecked Sendable {
     public static let shared = AGYCLIRunner()
 
     private let processLock = NSLock()
-    private var activeProcess: Process?
+    private var interactiveProcesses: [UUID: Process] = [:]
 
     private init() {}
 
@@ -340,14 +347,25 @@ public final class AGYCLIRunner: @unchecked Sendable {
         }
     }
 
-    /// Terminates any currently running `agy` subprocess immediately.
+    /// Terminates any currently running interactive `agy` UI subprocesses immediately (without killing concurrent LocalAPIServer requests).
     public func cancelCurrentProcess() {
         processLock.lock()
-        let proc = activeProcess
-        activeProcess = nil
+        let procs = Array(interactiveProcesses.values)
+        interactiveProcesses.removeAll()
         processLock.unlock()
 
-        guard let proc = proc, proc.isRunning else { return }
+        for proc in procs where proc.isRunning {
+            proc.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {
+                if proc.isRunning {
+                    kill(proc.processIdentifier, SIGKILL)
+                }
+            }
+        }
+    }
+
+    private func terminateProcess(_ proc: Process) {
+        guard proc.isRunning else { return }
         proc.terminate()
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {
             if proc.isRunning {
@@ -365,6 +383,7 @@ public final class AGYCLIRunner: @unchecked Sendable {
         customBinaryPath: String = "",
         portableRoot: String = "",
         workingDirectory: String? = nil,
+        isInteractive: Bool = true,
         onEvent: @escaping @Sendable (AGYStreamEvent) -> Void
     ) async throws {
         guard let binaryPath = Self.resolveBinaryPath(customPath: customBinaryPath, portableRoot: portableRoot) else {
@@ -375,10 +394,14 @@ public final class AGYCLIRunner: @unchecked Sendable {
             )
         }
 
+        let runId = UUID()
+        let procBox = AGYProcessBox()
+
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 DispatchQueue.global(qos: .userInitiated).async {
                     let proc = Process()
+                    procBox.set(proc)
                     proc.executableURL = URL(fileURLWithPath: binaryPath)
 
                     var args: [String] = [
@@ -447,17 +470,21 @@ public final class AGYCLIRunner: @unchecked Sendable {
                         bufferLock.unlock()
                     }
 
-                    self.processLock.lock()
-                    self.activeProcess = proc
-                    self.processLock.unlock()
+                    if isInteractive {
+                        self.processLock.lock()
+                        self.interactiveProcesses[runId] = proc
+                        self.processLock.unlock()
+                    }
 
                     do {
                         try proc.run()
                         proc.waitUntilExit()
                     } catch {
-                        self.processLock.lock()
-                        if self.activeProcess === proc { self.activeProcess = nil }
-                        self.processLock.unlock()
+                        if isInteractive {
+                            self.processLock.lock()
+                            self.interactiveProcesses.removeValue(forKey: runId)
+                            self.processLock.unlock()
+                        }
                         stdoutPipe.fileHandleForReading.readabilityHandler = nil
                         stderrPipe.fileHandleForReading.readabilityHandler = nil
                         continuation.resume(throwing: error)
@@ -488,9 +515,11 @@ public final class AGYCLIRunner: @unchecked Sendable {
                         onEvent(event)
                     }
 
-                    self.processLock.lock()
-                    if self.activeProcess === proc { self.activeProcess = nil }
-                    self.processLock.unlock()
+                    if isInteractive {
+                        self.processLock.lock()
+                        self.interactiveProcesses.removeValue(forKey: runId)
+                        self.processLock.unlock()
+                    }
 
                     if Task.isCancelled {
                         continuation.resume(throwing: CancellationError())
@@ -510,7 +539,9 @@ public final class AGYCLIRunner: @unchecked Sendable {
                 }
             }
         } onCancel: {
-            self.cancelCurrentProcess()
+            if let proc = procBox.get() {
+                self.terminateProcess(proc)
+            }
         }
     }
 

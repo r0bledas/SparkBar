@@ -155,6 +155,42 @@ public final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Optional Bearer / API key required by the Beta Local API server (empty = open on 127.0.0.1).
+    @Published public var localAPIServerToken: String {
+        didSet {
+            UserDefaults.standard.set(localAPIServerToken, forKey: "sparkbar.localAPIServerToken")
+        }
+    }
+
+    /// Custom global toggle hotkey (defaults to Option + Space: keyCode 49, modifiers 2048).
+    @Published public var hotkeyKeyCode: UInt32 {
+        didSet {
+            UserDefaults.standard.set(Int(hotkeyKeyCode), forKey: "sparkbar.hotkeyKeyCode")
+            HotkeyManager.shared.registerHotkey(keyCode: hotkeyKeyCode, modifiers: hotkeyModifiers)
+        }
+    }
+
+    @Published public var hotkeyModifiers: UInt32 {
+        didSet {
+            UserDefaults.standard.set(Int(hotkeyModifiers), forKey: "sparkbar.hotkeyModifiers")
+            HotkeyManager.shared.registerHotkey(keyCode: hotkeyKeyCode, modifiers: hotkeyModifiers)
+        }
+    }
+
+    public func updateGlobalHotkey(keyCode: UInt32, modifiers: UInt32) {
+        self.hotkeyKeyCode = keyCode
+        self.hotkeyModifiers = modifiers
+    }
+
+    public func resetHotkeyToDefault() {
+        updateGlobalHotkey(keyCode: 49, modifiers: 2048) // Option + Space
+    }
+
+    public func generateLocalAPIToken() {
+        let raw = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        self.localAPIServerToken = "sb-\(raw)"
+    }
+
     public var resolvedAGYBinaryPath: String? {
         AGYCLIRunner.resolveBinaryPath(customPath: agyCustomBinaryPath, portableRoot: agyPortableRootPath)
     }
@@ -200,6 +236,11 @@ public final class SettingsStore: ObservableObject {
         self.enableLocalAPIServer = defaults.object(forKey: "sparkbar.enableLocalAPIServer") as? Bool ?? false
         let savedPort = defaults.integer(forKey: "sparkbar.localAPIServerPort")
         self.localAPIServerPort = (savedPort >= 1024 && savedPort <= 65535) ? savedPort : 11435
+        self.localAPIServerToken = defaults.string(forKey: "sparkbar.localAPIServerToken") ?? ""
+        let savedKeyCode = defaults.object(forKey: "sparkbar.hotkeyKeyCode") as? Int
+        let savedMods = defaults.object(forKey: "sparkbar.hotkeyModifiers") as? Int
+        self.hotkeyKeyCode = UInt32(savedKeyCode ?? 49)
+        self.hotkeyModifiers = UInt32(savedMods ?? 2048)
 
         // Hydrate cached model metadata immediately for zero-flash startup
         if let cachedData = defaults.data(forKey: "sparkbar.cachedModels.\(self.selectedProvider.rawValue)"),

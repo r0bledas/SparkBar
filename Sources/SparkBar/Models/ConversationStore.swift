@@ -4,6 +4,8 @@ import AppKit
 public struct ConversationSession: Identifiable, Codable, Equatable {
     public var id: UUID
     public var title: String
+    public var customTitle: String?
+    public var isPinned: Bool
     public var createdAt: Date
     public var updatedAt: Date
     public var provider: String
@@ -11,9 +13,18 @@ public struct ConversationSession: Identifiable, Codable, Equatable {
     public var agyConversationId: String?
     public var messages: [ChatMessage]
 
+    public var displayTitle: String {
+        if let custom = customTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+            return custom
+        }
+        return title
+    }
+
     public init(
         id: UUID = UUID(),
         title: String = "New Chat",
+        customTitle: String? = nil,
+        isPinned: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         provider: String = "",
@@ -23,12 +34,32 @@ public struct ConversationSession: Identifiable, Codable, Equatable {
     ) {
         self.id = id
         self.title = title
+        self.customTitle = customTitle
+        self.isPinned = isPinned
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.provider = provider
         self.model = model
         self.agyConversationId = agyConversationId
         self.messages = messages
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, customTitle, isPinned, createdAt, updatedAt, provider, model, agyConversationId, messages
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "New Chat"
+        customTitle = try c.decodeIfPresent(String.self, forKey: .customTitle)
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        provider = try c.decodeIfPresent(String.self, forKey: .provider) ?? ""
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        agyConversationId = try c.decodeIfPresent(String.self, forKey: .agyConversationId)
+        messages = try c.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
     }
 
     /// Generates a clean, concise title from the first user message.
@@ -74,7 +105,10 @@ public final class ConversationStore: ObservableObject {
 
     public let conversationsDirectory: URL
     public let markdownLogsDirectory: URL
+    public let attachmentsDirectory: URL
     private let sessionsFileURL: URL
+    private let ioQueue = DispatchQueue(label: "com.sparkbar.conversations.io", qos: .utility)
+    private var searchIndex: [UUID: String] = [:]
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -82,12 +116,15 @@ public final class ConversationStore: ObservableObject {
         let appDir = base.appendingPathComponent("SparkBar", isDirectory: true)
         let convDir = appDir.appendingPathComponent("conversations", isDirectory: true)
         let logsDir = appDir.appendingPathComponent("logs", isDirectory: true)
+        let attachDir = appDir.appendingPathComponent("attachments", isDirectory: true)
 
         try? FileManager.default.createDirectory(at: convDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: attachDir, withIntermediateDirectories: true)
 
         self.conversationsDirectory = convDir
         self.markdownLogsDirectory = logsDir
+        self.attachmentsDirectory = attachDir
         self.sessionsFileURL = convDir.appendingPathComponent("sessions.json")
 
         loadFromDisk()
@@ -101,9 +138,93 @@ public final class ConversationStore: ObservableObject {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        if let decoded = try? decoder.decode([ConversationSession].self, from: data) {
-            self.sessions = decoded.sorted(by: { $0.updatedAt > $1.updatedAt })
+        if var decoded = try? decoder.decode([ConversationSession].self, from: data) {
+            // Migrate any inline base64 image payloads out of sessions.json into attachments/
+            // so sessions.json stays tiny (~200 KB instead of 60+ MB) and startup RAM stays low.
+            var didMigrate = false
+            for sIdx in decoded.indices {
+                let (compacted, changed) = offloadBase64Attachments(in: decoded[sIdx].messages)
+                if changed {
+                    decoded[sIdx].messages = compacted
+                    didMigrate = true
+                }
+            }
+            self.sessions = sortSessions(decoded)
+            rebuildSearchIndex()
+            if didMigrate {
+                saveToDisk()
+            }
         }
+    }
+
+    private func sortSessions(_ list: [ConversationSession]) -> [ConversationSession] {
+        list.sorted { lhs, rhs in
+            if lhs.isPinned != rhs.isPinned {
+                return lhs.isPinned && !rhs.isPinned
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
+    private func rebuildSearchIndex() {
+        var idx: [UUID: String] = [:]
+        idx.reserveCapacity(sessions.count)
+        for s in sessions {
+            idx[s.id] = buildSearchBlob(for: s)
+        }
+        searchIndex = idx
+    }
+
+    private func buildSearchBlob(for session: ConversationSession) -> String {
+        var parts: [String] = [session.displayTitle.lowercased()]
+        for m in session.messages where !m.content.isEmpty {
+            parts.append(m.content.lowercased())
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Fast pre-indexed search across all sessions (O(1) string scan per session instead of re-lowercasing every message).
+    public func filteredSessions(matching query: String) -> [ConversationSession] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return sessions }
+        return sessions.filter { session in
+            if let blob = searchIndex[session.id] {
+                return blob.contains(q)
+            }
+            return session.displayTitle.lowercased().contains(q)
+        }
+    }
+
+    private func offloadBase64Attachments(in messages: [ChatMessage]) -> ([ChatMessage], Bool) {
+        var out = messages
+        var changed = false
+        let fm = FileManager.default
+
+        for mIdx in out.indices where !out[mIdx].attachedImages.isEmpty {
+            for iIdx in out[mIdx].attachedImages.indices {
+                let img = out[mIdx].attachedImages[iIdx]
+                guard !img.base64Data.isEmpty else { continue }
+
+                let ext: String
+                switch img.mimeType.lowercased() {
+                case "image/png": ext = "png"
+                case "image/gif": ext = "gif"
+                case "image/webp": ext = "webp"
+                default: ext = "jpg"
+                }
+                let targetURL = attachmentsDirectory.appendingPathComponent("\(img.id.uuidString).\(ext)")
+                if !fm.fileExists(atPath: targetURL.path),
+                   let raw = Data(base64Encoded: img.base64Data) {
+                    try? raw.write(to: targetURL, options: .atomic)
+                }
+                if fm.fileExists(atPath: targetURL.path) {
+                    out[mIdx].attachedImages[iIdx].localFilePath = targetURL.path
+                    out[mIdx].attachedImages[iIdx].base64Data = ""
+                    changed = true
+                }
+            }
+        }
+        return (out, changed)
     }
 
     public func upsertSession(
@@ -116,10 +237,19 @@ public final class ConversationStore: ObservableObject {
         // Only persist sessions that have at least one message
         guard !messages.isEmpty else { return }
 
+        let (compactedMessages, _) = offloadBase64Attachments(in: messages)
         let now = Date()
-        let title = ConversationSession.makeTitle(from: messages)
+        let title = ConversationSession.makeTitle(from: compactedMessages)
 
         if let index = sessions.firstIndex(where: { $0.id == id }) {
+            // Skip redundant disk write if nothing actually changed
+            if sessions[index].messages == compactedMessages &&
+               sessions[index].provider == provider &&
+               sessions[index].model == model &&
+               (agyConversationId == nil || sessions[index].agyConversationId == agyConversationId) {
+                activeSessionId = id
+                return
+            }
             sessions[index].title = title
             sessions[index].updatedAt = now
             sessions[index].provider = provider
@@ -127,22 +257,24 @@ public final class ConversationStore: ObservableObject {
             if let agyId = agyConversationId, !agyId.isEmpty {
                 sessions[index].agyConversationId = agyId
             }
-            sessions[index].messages = messages
+            sessions[index].messages = compactedMessages
+            searchIndex[id] = buildSearchBlob(for: sessions[index])
         } else {
             let newSession = ConversationSession(
                 id: id,
                 title: title,
-                createdAt: messages.first?.timestamp ?? now,
+                createdAt: compactedMessages.first?.timestamp ?? now,
                 updatedAt: now,
                 provider: provider,
                 model: model,
                 agyConversationId: agyConversationId,
-                messages: messages
+                messages: compactedMessages
             )
             sessions.insert(newSession, at: 0)
+            searchIndex[id] = buildSearchBlob(for: newSession)
         }
 
-        sessions.sort(by: { $0.updatedAt > $1.updatedAt })
+        sessions = sortSessions(sessions)
         activeSessionId = id
         saveToDisk()
 
@@ -151,11 +283,27 @@ public final class ConversationStore: ObservableObject {
         }
     }
 
+    public func togglePin(id: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].isPinned.toggle()
+        sessions = sortSessions(sessions)
+        saveToDisk()
+    }
+
+    public func renameSession(id: UUID, newTitle: String) {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessions[idx].customTitle = trimmed.isEmpty ? nil : trimmed
+        searchIndex[id] = buildSearchBlob(for: sessions[idx])
+        saveToDisk()
+    }
+
     public func deleteSession(id: UUID) {
         if let session = sessions.first(where: { $0.id == id }) {
             removeMarkdownLog(for: session)
         }
         sessions.removeAll { $0.id == id }
+        searchIndex.removeValue(forKey: id)
         if activeSessionId == id {
             activeSessionId = nil
         }
@@ -167,6 +315,7 @@ public final class ConversationStore: ObservableObject {
             removeMarkdownLog(for: session)
         }
         sessions.removeAll()
+        searchIndex.removeAll()
         activeSessionId = nil
         saveToDisk()
     }
@@ -175,17 +324,9 @@ public final class ConversationStore: ObservableObject {
         NSWorkspace.shared.open(markdownLogsDirectory)
     }
 
-    private func saveToDisk() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(sessions) else { return }
-        try? data.write(to: sessionsFileURL, options: .atomic)
-    }
-
-    private func writeMarkdownLog(for session: ConversationSession) {
-        let logURL = markdownLogURL(for: session)
-        var md = "# \(session.title)\n\n"
+    /// Formats a session as clean Markdown for export or clipboard copy.
+    public func formatSessionMarkdown(_ session: ConversationSession) -> String {
+        var md = "# \(session.displayTitle)\n\n"
         let fmt = ISO8601DateFormatter()
         md += "- **Session ID**: `\(session.id.uuidString)`\n"
         md += "- **Created**: \(fmt.string(from: session.createdAt))\n"
@@ -222,8 +363,26 @@ public final class ConversationStore: ObservableObject {
                 break
             }
         }
+        return md
+    }
 
-        try? md.write(to: logURL, atomically: true, encoding: .utf8)
+    private func saveToDisk() {
+        let snapshot = sessions
+        let url = sessionsFileURL
+        ioQueue.async {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            guard let data = try? encoder.encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private func writeMarkdownLog(for session: ConversationSession) {
+        let logURL = markdownLogURL(for: session)
+        let md = formatSessionMarkdown(session)
+        ioQueue.async {
+            try? md.write(to: logURL, atomically: true, encoding: .utf8)
+        }
     }
 
     private func removeMarkdownLog(for session: ConversationSession) {

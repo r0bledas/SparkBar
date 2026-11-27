@@ -18,7 +18,7 @@ public final class GitHubUpdater: ObservableObject {
     @Published public var remoteCommitSHA: String? = nil
 
     public var installedVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.8.8"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.9.0"
     }
 
     public var installedCommitSHA: String {

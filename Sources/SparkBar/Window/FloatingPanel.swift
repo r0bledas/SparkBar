@@ -231,6 +231,21 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
     private var panel: FloatingPanel?
     public let focusTrigger = PassthroughSubject<Void, Never>()
+    private nonisolated let visibilityLock = NSLock()
+    private nonisolated(unsafe) var _isPanelVisible = false
+
+    /// Thread-safe visibility check so global mouse monitors do zero main-thread dispatches while hidden.
+    public nonisolated var isPanelVisibleAtomic: Bool {
+        visibilityLock.lock()
+        defer { visibilityLock.unlock() }
+        return _isPanelVisible
+    }
+
+    private func setPanelVisibleAtomic(_ visible: Bool) {
+        visibilityLock.lock()
+        _isPanelVisible = visible
+        visibilityLock.unlock()
+    }
 
     /// Current screen-space frame of the floating panel when visible (used for reliable global cursor hover checks).
     public var currentPanelFrame: NSRect? {
@@ -351,10 +366,12 @@ public final class PanelController: NSObject, NSWindowDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        setPanelVisibleAtomic(true)
         focusTrigger.send()
     }
 
     public func hidePanel() {
+        setPanelVisibleAtomic(false)
         panel?.orderOut(nil)
     }
 

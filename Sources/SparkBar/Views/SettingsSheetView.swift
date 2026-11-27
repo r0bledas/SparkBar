@@ -70,6 +70,8 @@ public struct SettingsSheetView: View {
     @State private var baseURLInput: String = ""
     @State private var localAPIPortInput: String = ""
     @State private var copiedEndpointLabel: String? = nil
+    @State private var isRecordingHotkey: Bool = false
+    @State private var hotkeyRecorderMonitor: Any? = nil
     @State private var showSavedToast: Bool = false
     @State private var isDownloadingAGY: Bool = false
     @State private var agyDownloadStatus: String = ""
@@ -399,6 +401,50 @@ public struct SettingsSheetView: View {
                                 endpointCopyRow(label: "Ollama", url: "http://127.0.0.1:\(port)")
                                 endpointCopyRow(label: "Gemini", url: "http://127.0.0.1:\(port)/v1beta")
                                 endpointCopyRow(label: "llama.cpp", url: "http://127.0.0.1:\(port)/completion")
+
+                                Divider().opacity(0.35).padding(.vertical, 2)
+
+                                HStack(spacing: 8) {
+                                    Text("Auth Key")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 66, alignment: .leading)
+
+                                    SecureField("Optional Bearer token", text: $settings.localAPIServerToken)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.system(size: 11, design: .monospaced))
+
+                                    Button("Generate") {
+                                        settings.generateLocalAPIToken()
+                                    }
+                                    .controlSize(.small)
+
+                                    if !settings.localAPIServerToken.isEmpty {
+                                        Button {
+                                            NSPasteboard.general.clearContents()
+                                            NSPasteboard.general.setString(settings.localAPIServerToken, forType: .string)
+                                            copiedEndpointLabel = "AuthKey"
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                                if copiedEndpointLabel == "AuthKey" { copiedEndpointLabel = nil }
+                                            }
+                                        } label: {
+                                            Image(systemName: copiedEndpointLabel == "AuthKey" ? "checkmark" : "doc.on.doc")
+                                                .font(.system(size: 10.5))
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("Copy Bearer token")
+
+                                        Button {
+                                            settings.localAPIServerToken = ""
+                                        } label: {
+                                            Image(systemName: "xmark.circle")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("Clear token (open on localhost)")
+                                    }
+                                }
                             }
                             .padding(10)
                             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -417,14 +463,40 @@ public struct SettingsSheetView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
 
-                        HStack {
+                        HStack(spacing: 8) {
                             Text("Global Toggle Shortcut:")
                                 .font(.system(size: 12))
-                            Text("⌥ Space (Option + Space)")
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+
+                            Button {
+                                toggleHotkeyRecording()
+                            } label: {
+                                Text(isRecordingHotkey
+                                     ? "Press shortcut… (Esc to cancel)"
+                                     : HotkeyManager.displayString(keyCode: settings.hotkeyKeyCode, modifiers: settings.hotkeyModifiers))
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(isRecordingHotkey ? Color.accentColor : Color.primary)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 3.5)
+                                    .background(
+                                        (isRecordingHotkey ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.08)),
+                                        in: RoundedRectangle(cornerRadius: 5)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 5)
+                                            .strokeBorder(isRecordingHotkey ? Color.accentColor.opacity(0.55) : Color.clear, lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .help("Click to record a custom global hotkey")
+
+                            if settings.hotkeyKeyCode != 49 || settings.hotkeyModifiers != 2048 {
+                                Button("Reset") {
+                                    stopHotkeyRecording()
+                                    settings.resetHotkeyToDefault()
+                                }
+                                .buttonStyle(.link)
+                                .font(.system(size: 11))
+                            }
                         }
 
                         Toggle("Keep window pinned when clicking outside", isOn: $settings.pinWindowOnBlur)
@@ -524,6 +596,9 @@ public struct SettingsSheetView: View {
             localAPIPortInput = String(settings.localAPIServerPort)
             agyAccounts.reload()
         }
+        .onDisappear {
+            stopHotkeyRecording()
+        }
         .alert(
             agyAccounts.accounts.count <= 1 ? "Sign Out & Remove Last Account?" : "Remove Account?",
             isPresented: $showRemoveAccountConfirm
@@ -588,6 +663,34 @@ public struct SettingsSheetView: View {
         settings.localAPIServerPort = parsed
         if settings.enableLocalAPIServer {
             LocalAPIServer.shared.start(port: parsed)
+        }
+    }
+
+    private func toggleHotkeyRecording() {
+        if isRecordingHotkey {
+            stopHotkeyRecording()
+            return
+        }
+        isRecordingHotkey = true
+        hotkeyRecorderMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let code = UInt32(event.keyCode)
+            if code == 53 { // Escape cancels recording
+                stopHotkeyRecording()
+                return nil
+            }
+            let mods = HotkeyManager.carbonModifiers(from: event.modifierFlags)
+            guard mods != 0 else { return nil } // Require at least one modifier key (⌥, ⌘, ⌃, or ⇧)
+            settings.updateGlobalHotkey(keyCode: code, modifiers: mods)
+            stopHotkeyRecording()
+            return nil
+        }
+    }
+
+    private func stopHotkeyRecording() {
+        isRecordingHotkey = false
+        if let mon = hotkeyRecorderMonitor {
+            NSEvent.removeMonitor(mon)
+            hotkeyRecorderMonitor = nil
         }
     }
 

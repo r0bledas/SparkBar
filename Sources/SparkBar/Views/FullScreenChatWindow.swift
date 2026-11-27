@@ -123,6 +123,10 @@ private final class FullScreenChatNSWindow: NSWindow {
                 SettingsWindowController.shared.showWindow()
                 return true
             }
+            if char == "c" && event.modifierFlags.contains(.shift) {
+                ChatViewModel.shared.copyCurrentConversationMarkdown()
+                return true
+            }
             if char == "v" {
                 if ChatViewModel.shared.checkAndAttachPasteboardImage() {
                     return true
@@ -150,16 +154,14 @@ public struct FullScreenChatView: View {
     @State private var isUserScrolledUp: Bool = false
     @State private var isDropTargeted: Bool = false
     @State private var renderedMessageLimit: Int = 30
+    @State private var renamingSessionId: UUID? = nil
+    @State private var renameDraftTitle: String = ""
+    @State private var showCopiedThreadToast: Bool = false
 
     public init() {}
 
     private var filteredSessions: [ConversationSession] {
-        let q = historySearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return conversationStore.sessions }
-        return conversationStore.sessions.filter { session in
-            if session.title.lowercased().contains(q) { return true }
-            return session.messages.contains { $0.content.lowercased().contains(q) }
-        }
+        conversationStore.filteredSessions(matching: historySearchText)
     }
 
     private var visibleMessages: [ChatMessage] {
@@ -196,6 +198,19 @@ public struct FullScreenChatView: View {
                 .strokeBorder(Color.accentColor.opacity(isDropTargeted ? 0.75 : 0), lineWidth: 3)
                 .allowsHitTesting(false)
         )
+        .alert("Rename Conversation", isPresented: Binding(
+            get: { renamingSessionId != nil },
+            set: { if !$0 { renamingSessionId = nil } }
+        )) {
+            TextField("Conversation title", text: $renameDraftTitle)
+            Button("Cancel", role: .cancel) { renamingSessionId = nil }
+            Button("Save") {
+                if let id = renamingSessionId {
+                    conversationStore.renameSession(id: id, newTitle: renameDraftTitle)
+                }
+                renamingSessionId = nil
+            }
+        }
     }
 
     // MARK: - Integrated History Sidebar
@@ -280,12 +295,17 @@ public struct FullScreenChatView: View {
                                 } label: {
                                     VStack(alignment: .leading, spacing: 3) {
                                         HStack(spacing: 5) {
+                                            if session.isPinned {
+                                                Image(systemName: "pin.fill")
+                                                    .font(.system(size: 9))
+                                                    .foregroundStyle(.orange)
+                                            }
                                             if isCurrent {
                                                 Circle()
                                                     .fill(Color.accentColor)
                                                     .frame(width: 6, height: 6)
                                             }
-                                            Text(session.title)
+                                            Text(session.displayTitle)
                                                 .font(.system(size: 12.5, weight: isCurrent ? .semibold : .medium))
                                                 .foregroundStyle(.primary)
                                                 .lineLimit(1)
@@ -310,7 +330,11 @@ public struct FullScreenChatView: View {
 
                                 if isHovered || isCurrent {
                                     Button {
+                                        let wasActive = (session.id == viewModel.currentSessionId)
                                         conversationStore.deleteSession(id: session.id)
+                                        if wasActive {
+                                            viewModel.startNewConversation()
+                                        }
                                     } label: {
                                         Image(systemName: "trash")
                                             .font(.system(size: 10.5))
@@ -330,6 +354,36 @@ public struct FullScreenChatView: View {
                                     : (isHovered ? Color.primary.opacity(0.055) : Color.clear),
                                 in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                             )
+                            .contextMenu {
+                                Button {
+                                    conversationStore.togglePin(id: session.id)
+                                } label: {
+                                    Label(session.isPinned ? "Unpin" : "Pin to Top", systemImage: session.isPinned ? "pin.slash" : "pin")
+                                }
+                                Button {
+                                    renameDraftTitle = session.displayTitle
+                                    renamingSessionId = session.id
+                                } label: {
+                                    Label("Rename…", systemImage: "pencil")
+                                }
+                                Button {
+                                    let md = conversationStore.formatSessionMarkdown(session)
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(md, forType: .string)
+                                } label: {
+                                    Label("Copy as Markdown", systemImage: "doc.on.doc")
+                                }
+                                Divider()
+                                Button(role: .destructive) {
+                                    let wasActive = (session.id == viewModel.currentSessionId)
+                                    conversationStore.deleteSession(id: session.id)
+                                    if wasActive {
+                                        viewModel.startNewConversation()
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                             .onHover { hovering in
                                 hoveredSessionId = hovering ? session.id : (hoveredSessionId == session.id ? nil : hoveredSessionId)
                             }
@@ -1006,6 +1060,57 @@ public struct FullScreenChatView: View {
                             .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+
+                        if !viewModel.isStreaming && message.id == viewModel.messages.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.id {
+                            Button {
+                                viewModel.regenerateLastResponse()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 10))
+                                    Text("Regenerate")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Regenerate response")
+
+                            Button {
+                                viewModel.editLastUserMessage()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 10))
+                                    Text("Edit Prompt")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Edit last prompt and resend")
+
+                            Spacer()
+
+                            Button {
+                                if viewModel.copyCurrentConversationMarkdown() {
+                                    showCopiedThreadToast = true
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                        showCopiedThreadToast = false
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: showCopiedThreadToast ? "checkmark" : "square.and.arrow.up")
+                                        .font(.system(size: 10))
+                                    Text(showCopiedThreadToast ? "Thread Copied" : "Copy Thread")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Copy full conversation as Markdown (⌘⇧C)")
+                        }
                     }
                 } else if viewModel.isStreaming && message.id == viewModel.messages.last?.id && viewModel.activeToolStatus == nil {
                     HStack(spacing: 6) {

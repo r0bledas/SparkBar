@@ -590,7 +590,7 @@ public struct MarkdownMessageView: View, Equatable {
             .textSelection(.enabled)
     }
 
-    private static func coalesceSelectableTextBlocks(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
+    private nonisolated static func coalesceSelectableTextBlocks(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
         var result: [MarkdownBlock] = []
         var textAccumulator: [String] = []
         var currentId: Int = 0
@@ -619,7 +619,7 @@ public struct MarkdownMessageView: View, Equatable {
         return result
     }
 
-    private static func buildUnifiedAttributedString(from content: String) -> AttributedString {
+    private nonisolated static func buildUnifiedAttributedString(from content: String) -> AttributedString {
         let processed = convertInlineLaTeXInText(content)
         let lines = processed.components(separatedBy: "\n")
         var result = AttributedString()
@@ -654,11 +654,11 @@ public struct MarkdownMessageView: View, Equatable {
         return styleLinks(in: result)
     }
 
-    private static let linkDetector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-    private static let regexCacheLock = NSLock()
-    private static var compiledRegexCache: [String: NSRegularExpression] = [:]
+    private nonisolated static let linkDetector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    private nonisolated static let regexCacheLock = NSLock()
+    private nonisolated(unsafe) static var compiledRegexCache: [String: NSRegularExpression] = [:]
 
-    private static func cachedRegex(_ pattern: String) -> NSRegularExpression? {
+    private nonisolated static func cachedRegex(_ pattern: String) -> NSRegularExpression? {
         regexCacheLock.lock()
         defer { regexCacheLock.unlock() }
         if let existing = compiledRegexCache[pattern] {
@@ -671,7 +671,7 @@ public struct MarkdownMessageView: View, Equatable {
 
     /// Auto-links bare `https://` / `http://` URLs and styles all hyperlinks with bright macOS link color + single underline
     /// so every clickable link stands out unmistakably inside the translucent HUD panel.
-    private static func styleLinks(in input: AttributedString) -> AttributedString {
+    private nonisolated static func styleLinks(in input: AttributedString) -> AttributedString {
         var attr = input
 
         // 1. Auto-detect bare URLs inside plain text that aren't already Markdown links
@@ -706,7 +706,7 @@ public struct MarkdownMessageView: View, Equatable {
 
     // MARK: - LaTeX to Unicode Mathematical Formatter
 
-    public static func convertInlineLaTeXInText(_ input: String) -> String {
+    public nonisolated static func convertInlineLaTeXInText(_ input: String) -> String {
         guard input.contains("$") || input.contains("\\") else { return input }
         var result = input
 
@@ -728,7 +728,7 @@ public struct MarkdownMessageView: View, Equatable {
         return result
     }
 
-    private static func replaceRegexMatches(in text: String, pattern: String, transform: (String) -> String) -> String {
+    private nonisolated static func replaceRegexMatches(in text: String, pattern: String, transform: (String) -> String) -> String {
         guard let regex = Self.cachedRegex(pattern) else { return text }
         var out = text
         let matches = regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
@@ -744,7 +744,7 @@ public struct MarkdownMessageView: View, Equatable {
         return out
     }
 
-    public static func renderLaTeXToUnicode(_ latex: String) -> String {
+    public nonisolated static func renderLaTeXToUnicode(_ latex: String) -> String {
         var s = latex.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let symbolMap: [(String, String)] = [
@@ -889,7 +889,7 @@ public struct MarkdownMessageView: View, Equatable {
 
     // MARK: - Block Parser (Code blocks, Display Math, Headings, Rules, Blockquotes, Tables, ASCII art, and prose)
 
-    public static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
+    public nonisolated static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         let lines = markdown.components(separatedBy: "\n")
         var inCodeBlock = false

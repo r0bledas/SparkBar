@@ -305,7 +305,7 @@ public final class LLMStreamingClient {
                     // DeepSeek Pro / Reasoner is text-only: enrich prompt with on-device Vision OCR + local file path
                     var enriched = apiUserText
                     for img in msg.attachedImages {
-                        let ocr = VisionOCRHelper.recognizeText(from: img.base64Data)
+                        let ocr = VisionOCRHelper.recognizeText(from: img.resolvedBase64Data())
                         var block = "\n\n[Attached Image: \(img.fileName ?? "image.png")"
                         if let loc = img.localFilePath {
                             block += " | Local Path: `\(loc)`"
@@ -324,10 +324,12 @@ public final class LLMStreamingClient {
                         contentParts.append(["type": "text", "text": apiUserText])
                     }
                     for img in msg.attachedImages {
+                        let b64 = img.resolvedBase64Data()
+                        guard !b64.isEmpty else { continue }
                         contentParts.append([
                             "type": "image_url",
                             "image_url": [
-                                "url": "data:\(img.mimeType);base64,\(img.base64Data)"
+                                "url": "data:\(img.mimeType);base64,\(b64)"
                             ]
                         ])
                     }
@@ -502,12 +504,14 @@ public final class LLMStreamingClient {
                 } else {
                     var contentBlocks: [[String: Any]] = []
                     for img in msg.attachedImages {
+                        let b64 = img.resolvedBase64Data()
+                        guard !b64.isEmpty else { continue }
                         contentBlocks.append([
                             "type": "image",
                             "source": [
                                 "type": "base64",
                                 "media_type": img.mimeType,
-                                "data": img.base64Data
+                                "data": b64
                             ]
                         ])
                     }
